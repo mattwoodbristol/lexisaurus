@@ -12,8 +12,8 @@ for the full design.
 
 ## Run your own tutor
 
-**No terminal needed:** click the button, sign in to Cloudflare (a free account is enough) and
-enter a passphrase and your Anthropic API key (console.anthropic.com; set a monthly spend limit
+**No terminal needed:** with a free GitHub account ready, click the button, sign in to
+Cloudflare (a free account is enough), connect GitHub and enter a passphrase and your Anthropic API key (console.anthropic.com; set a monthly spend limit
 there). Cloudflare copies this project to your GitHub account, creates the database and deploys
 it. Step-by-step, with the iPhone and Android install: `docs/getting-started.md`.
 

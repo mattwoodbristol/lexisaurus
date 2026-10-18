@@ -1,8 +1,9 @@
 # Getting started
 
 Your own Lexisaurus runs on your own free Cloudflare account and uses your own Claude API key,
-so your data and your spending stay under your control. Setting it up takes about ten minutes
-and needs no programming.
+so your data and your spending stay under your control. Setting it up takes about fifteen
+minutes and needs no programming. You need three accounts: Anthropic (for Claude), GitHub and
+Cloudflare. Steps 1 and 2 make the first two; Cloudflare's is made during step 3.
 
 ## 1. Get a Claude API key
 
@@ -12,11 +13,21 @@ and needs no programming.
 4. Under **API keys**, create a key and copy it. It starts `sk-ant-`. Keep it somewhere safe for
    the next step; you will not be shown it again.
 
-## 2. Deploy
+## 2. Make a GitHub account
+
+GitHub holds your copy of the app's code and keeps it up to date. It is free, and after setup
+you do not need to use it.
+
+1. Go to [github.com/signup](https://github.com/signup) and create an account (skip this if you
+   have one).
+2. Confirm your email address when GitHub asks.
+
+## 3. Deploy
 
 1. Click **Deploy to Cloudflare** in the README.
-2. Sign in to Cloudflare or create a free account, and connect GitHub when asked (Cloudflare
-   puts a copy of the project in your GitHub account, which is how you get updates later).
+2. Sign in to Cloudflare or create a free account, and connect GitHub when asked: sign in with
+   the account from step 2 and allow access. Cloudflare puts a copy of the project in your
+   GitHub account, which is how your app updates itself later.
 3. Fill in the two secrets:
    - **PASSPHRASE**: the passphrase you will sign in with, 12 or more characters. Anyone who
      knows it can use your tutor (and your API credit), so treat it like a password.
@@ -24,7 +35,7 @@ and needs no programming.
 4. Leave the other settings as they are and click **Create and deploy**. After a minute or two
    Cloudflare shows your app's address, something like `https://lexisaurus.<you>.workers.dev`.
 
-## 3. Put it on your phone
+## 4. Put it on your phone
 
 Open the address on your phone first, then:
 
@@ -41,7 +52,7 @@ Open the address on your phone first, then:
 1. In Chrome, tap **Install** on the home page (or the menu ⋮ → **Install app**).
 2. Open it from the new icon and sign in.
 
-## 4. First run
+## 5. First run
 
 A short welcome asks which languages you want and a little about you, then a level check sets
 where lessons and conversations start. To get daily reminders, open **Settings** and tap
