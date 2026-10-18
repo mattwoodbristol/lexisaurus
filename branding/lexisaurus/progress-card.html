@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lexisaurus progress card — reference</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=Figtree:wght@400;600;700&display=swap">
+<style>
+  :root {
+    --bg: #ffffff; --card: #ffffff; --line: #dfe5ec; --text: #1f3a5f; --muted: #5a6b80;
+    --label: #9a5418; --track: #e3e9f0; --fill: #b5651d; --tile: #f6ecdf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121417; --card: #1a1e23; --line: #2a3038; --text: #e9eef5; --muted: #9aa7b8;
+            --label: #e0924f; --track: #2a3038; --fill: #d07a35; --tile: #2e2620; }
+  }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text); font-family: Figtree, system-ui, sans-serif; }
+  .lexi-card { max-width: 360px; margin: 0 auto; box-sizing: border-box; background: var(--card); border: 1px solid var(--line);
+    border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+  .lexi-head { display: flex; align-items: center; gap: 16px; }
+  .lexi-tile { width: 120px; height: 120px; flex: none; border-radius: 18px; background: var(--tile);
+    display: flex; align-items: flex-end; justify-content: center; overflow: hidden; line-height: 0; }
+  .lexi-eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--label); }
+  .lexi-stage { font-family: 'Bricolage Grotesque', sans-serif; font-size: 28px; font-weight: 800; line-height: 1.05; }
+  .lexi-count { display: flex; align-items: baseline; gap: 8px; }
+  .lexi-count b { font-family: 'Bricolage Grotesque', sans-serif; font-size: 44px; line-height: 1; }
+  .lexi-count span, .lexi-ends { color: var(--muted); }
+  .lexi-track { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
+  .lexi-fill { height: 100%; border-radius: 6px; background: var(--fill); transition: width .4s ease; }
+  .lexi-ends { display: flex; justify-content: space-between; font-size: 14px; margin-top: 8px; }
+  .lexi-next { font-size: 15px; }
+  .lexi-next b { color: var(--label); }
+  .demo { max-width: 360px; margin: 24px auto 0; font-size: 14px; color: var(--muted); }
+  .demo input { width: 100%; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); box-sizing: border-box; min-height: 44px; }
+</style>
+</head>
+<body>
+<article class="lexi-card" aria-labelledby="lexi-stage">
+  <div class="lexi-head">
+    <div class="lexi-tile" id="lexi-art"></div>
+    <div>
+      <div class="lexi-eyebrow" id="lexi-eyebrow">Stage 1 of 5</div>
+      <div class="lexi-stage" id="lexi-stage">Egg</div>
+    </div>
+  </div>
+  <div class="lexi-count"><b id="lexi-known">0</b><span>words known</span></div>
+  <div>
+    <div class="lexi-track" role="progressbar" aria-label="Progress to next stage" aria-valuemin="0" aria-valuemax="100" id="lexi-bar"><div class="lexi-fill" id="lexi-fill"></div></div>
+    <div class="lexi-ends"><span id="lexi-from">0</span><span id="lexi-to">250</span></div>
+  </div>
+  <div class="lexi-next" id="lexi-next"></div>
+</article>
+
+<div class="demo">
+  <label for="kw">Known words (demo control)</label>
+  <input id="kw" type="number" min="0" value="1248">
+</div>
+
+<script type="module">
+  import { lexisaurusSVG, stageForWords } from './src/lexisaurus.js';
+  const fmt = (n) => n.toLocaleString('en-GB');
+  const $ = (id) => document.getElementById(id);
+
+  export function renderProgressCard(knownWords, word = '你好') {
+    const { index, stage, next, progress, toGo } = stageForWords(knownWords);
+    $('lexi-art').innerHTML = lexisaurusSVG({ stage: stage.key, word, size: 116, label: '' });
+    $('lexi-eyebrow').textContent = `Stage ${index + 1} of 5`;
+    $('lexi-stage').textContent = stage.name;
+    $('lexi-known').textContent = fmt(knownWords);
+    const pct = Math.round(progress * 1000) / 10;
+    $('lexi-fill').style.width = pct + '%';
+    $('lexi-bar').setAttribute('aria-valuenow', String(pct));
+    $('lexi-from').textContent = fmt(stage.min);
+    $('lexi-to').textContent = next ? `${fmt(next.min)} · ${next.name}` : 'Max';
+    $('lexi-next').innerHTML = next ? `<b>${fmt(toGo)}</b> words to ${next.name}` : 'Fully grown. Keep chatting.';
+  }
+
+  const input = $('kw');
+  const update = () => renderProgressCard(Math.max(0, Number(input.value) || 0));
+  input.addEventListener('input', update);
+  update();
+</script>
+</body>
+</html>

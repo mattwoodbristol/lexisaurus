@@ -1,0 +1,5 @@
+[
+  {"name":"自我介绍","tags":["people","daily"],"scenario":"Meeting someone new at a party: names, where you are from, what you do."},
+  {"name":"在咖啡馆","tags":["food","shopping"],"scenario":"Ordering drinks in a café; the barista asks follow-up questions."},
+  {"name":"周末","tags":["plans","daily"],"scenario":"Chatting about what each of you did last weekend and plans for the next one."}
+]

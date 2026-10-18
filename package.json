@@ -1,0 +1,56 @@
+{
+  "name": "language-tutor",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Personal language tutor PWA (Mandarin, Italian) on Cloudflare Workers + D1, backed by the Claude API.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "vite",
+    "build": "vite build",
+    "deploy": "npm run build && npm run db:migrate && wrangler deploy",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/web/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "vapid": "node scripts/make-vapid.mjs",
+    "import:pleco": "tsx scripts/import-pleco.ts",
+    "import:sheet": "tsx scripts/import-sheet.ts data/seed/mandarin-vocab.csv",
+    "seed:local": "bash scripts/seed.sh --local",
+    "seed:remote": "bash scripts/seed.sh --remote",
+    "smoke": "bash scripts/smoke.sh && bash scripts/smoke-chat.sh && node scripts/smoke-phase2.mjs",
+    "import:lessons": "tsx scripts/import-lessons.ts",
+    "course": "tsx scripts/course.ts",
+    "setup": "node scripts/setup.mjs"
+  },
+  "cloudflare": {
+    "bindings": {
+      "PASSPHRASE": {
+        "description": "Choose the passphrase you will sign in with, **12 or more characters**. Anyone who knows it can use your tutor."
+      },
+      "ANTHROPIC_API_KEY": {
+        "description": "Your Claude API key from [console.anthropic.com](https://console.anthropic.com/settings/keys) (starts `sk-ant-`). Set a monthly spend limit there too."
+      }
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "hono": "^4.13.13",
+    "pinyin-pro": "^3.29.4",
+    "preact": "^10.29.8",
+    "ts-fsrs": "^5.4.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261001.1",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.2",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.147.0"
+  }
+}

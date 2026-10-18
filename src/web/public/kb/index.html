@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Keyboard tests</title>
+<style>body { font: 18px/1.5 system-ui, sans-serif; margin: 16px; } a { display: block; padding: 10px 0; } button { font: inherit; padding: 10px 14px; }</style>
+</head>
+<body>
+<h1>Keyboard tests</h1>
+<p>Open each test and long-press space in its box. Note which ones let you change language.</p>
+<a href="/kb/1">1. Bare page</a>
+<a href="/kb/2">2. + app viewport setting</a>
+<a href="/kb/3">3. + theme colour and manifest</a>
+<a href="/kb/4">4. + app stylesheet and container</a>
+<p><strong>Kinds of text box</strong> (all on a bare page)</p>
+<a href="/kb/5">5. Multi-line text area</a>
+<a href="/kb/6">6. Search box</a>
+<a href="/kb/7">7. Editable block</a>
+<a href="/kb/8">8. Text box with predictive text on</a>
+<p id="sw">Service worker: checking…</p>
+<button id="off">Turn off the service worker, then retest 1</button>
+<script>
+  const s = document.getElementById('sw');
+  navigator.serviceWorker?.getRegistrations().then((r) => (s.textContent = 'Service worker: ' + (r.length ? 'on' : 'off')));
+  document.getElementById('off').onclick = async () => {
+    for (const r of (await navigator.serviceWorker?.getRegistrations()) ?? []) await r.unregister();
+    location.href = '/kb/1';
+  };
+</script>
+</body>
+</html>

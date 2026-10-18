@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "language-tutor",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // Built PWA (vite build -> dist/web). The Worker runs first only for /api/*;
+  // everything else is served as a static asset with SPA fallback.
+  "assets": {
+    "directory": "./dist/web",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/__scheduled"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "language-tutor",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // One trigger, every 15 minutes. Which sessions to notify (per-language
+  // times, quiet hours, already-done-today) is decided in code, not in cron.
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": { "APP_NAME": "Lexisaurus" }
+}

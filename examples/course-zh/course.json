@@ -1,0 +1,19 @@
+{
+  "lang": "zh",
+  "title": "Mandarin starter (example)",
+  "lessons": ["shi-to-be", "ma-questions"],
+  "planned": [
+    {
+      "id": "measure-words",
+      "title": "Measure words",
+      "level": "HSK 1",
+      "focus": "Number + measure word + noun: 一个人, 两本书, 三杯咖啡. 个 as the default; 本, 杯, 张, 只 for common nouns. 两 not 二 before a measure word."
+    },
+    {
+      "id": "le-completed-actions",
+      "title": "了 for completed actions",
+      "level": "HSK 2",
+      "focus": "Verb + 了 for a completed action (我买了一本书); negation with 没 and no 了 (我没买); sentence-final 了 for a change of state."
+    }
+  ]
+}

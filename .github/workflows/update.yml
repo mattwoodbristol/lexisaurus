@@ -1,0 +1,25 @@
+# Keeps a copy made with the Deploy to Cloudflare button up to date: once a day it takes the
+# latest published release (release.json says from where) and pushes it, and Cloudflare
+# redeploys. Does nothing in the published repository itself or where no upstream is set.
+name: Update Lexisaurus
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Take the latest release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          node scripts/update-from-upstream.mjs
+      - name: Push it (Cloudflare redeploys)
+        run: git push origin HEAD
