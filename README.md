@@ -275,6 +275,11 @@ assets included. D1 Free: 5 GB storage, 5M rows read/day, 100k rows written/day.
 comfortably above a single user's needs. The 10 ms CPU limit is the one to watch; Claude
 calls are I/O wait, not CPU.
 
+## Support
+
+Lexisaurus is free and made by one person. If it helps you, you can support it on
+[Ko-fi](https://ko-fi.com/mattwoodbristol) (also linked from Settings in the app).
+
 ## Licence
 
 GNU Affero General Public License v3.0 (AGPL-3.0): use, change and share it freely; if you share

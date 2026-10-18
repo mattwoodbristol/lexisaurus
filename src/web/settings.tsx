@@ -525,6 +525,14 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
           Download backup
         </a>
       </div>
+
+      <div class="card">
+        <strong>Support Lexisaurus</strong>
+        <p class="muted small">Lexisaurus is free and open source, made by one person. If it helps you learn, a small donation helps keep it going.</p>
+        <a class="button-link secondary" href="https://ko-fi.com/mattwoodbristol" target="_blank" rel="noopener">
+          ♥ Donate on Ko-fi
+        </a>
+      </div>
     </>
   );
 }
