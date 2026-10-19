@@ -8,10 +8,11 @@ import { getDict, trackWords } from './words';
 import { pinyinPerChar } from './pinyin';
 import { annotate } from '../core/pinyin/annotate';
 import { isSectioned, renderLessonMd, validateLesson, lessonStrings, type LessonContent } from '../core/lessons/types';
+import { fixAnswerKey, type WrongKey } from '../core/lessons/fix';
 import { stripPinyin } from '../core/pinyin/strip';
 import { ZH_CURRICULUM, type CurriculumItem } from '../core/languages/zh.curriculum';
-import { promptsFor, hasPrompts } from '../../prompts';
-import { getLanguage } from '../core/languages';
+import { promptsFor, hasPrompts, proofreadLessonPrompt } from '../../prompts';
+import { getLanguage, type LanguageConfig } from '../core/languages';
 import { sameText, rulesFor } from '../core/text/rules';
 import { mixCheck } from '../core/lessons/practice';
 import { lessonMastery } from './mastery';
@@ -57,6 +58,33 @@ const LessonSchema = z.object({
   checkTranslate: z.array(z.object({ en: z.string(), zh: z.string() })),
   checkFix: z.array(z.object({ wrong: z.string(), right: z.string(), note: z.string() })),
 });
+
+const Proofread = LessonSchema.extend({ changes: z.array(z.string()) });
+
+/**
+ * A second pass over a new lesson before the learner sees it: a stronger model corrects the
+ * language, translations, examples off the pattern and multiple-choice answers. The draft is kept
+ * if the check fails or its result is not a valid lesson.
+ */
+async function proofreadLesson(env: Env, language: LanguageConfig, draft: z.infer<typeof LessonSchema>): Promise<z.infer<typeof LessonSchema>> {
+  try {
+    const { changes, ...checked } = await callStructured(env, {
+      role: 'checking',
+      system: [proofreadLessonPrompt(language.name)],
+      messages: [{ role: 'user', content: JSON.stringify(draft) }],
+      maxTokens: 9000,
+      effort: 'medium',
+      schema: Proofread,
+      extraCheck: (v) => validateLesson(toLessonContent(v), language.script),
+    });
+    if (changes.length) console.log(`proofread "${draft.title}": ${changes.join('; ')}`);
+    return checked;
+  } catch (e) {
+    // Out of budget too: the draft is already paid for, so it is kept rather than lost.
+    console.error('proofreading the lesson failed; keeping the draft', e);
+    return draft;
+  }
+}
 
 /** The generated lesson in the stored shape: practice arrays become recognise + a mixed check. */
 function toLessonContent(g: z.infer<typeof LessonSchema>): LessonContent {
@@ -345,11 +373,17 @@ lessonRoutes.post('/grade', async (c) => {
   // Pinyin clean-up is for Chinese only (it would eat accented letters such as è).
   const answer = (language.hasRomanisation ? stripPinyin(raw) : raw).slice(0, 200);
   const expected = typeof body.expected === 'string' ? body.expected : '';
-  if (!answer || !expected || (body.kind !== 'translate' && body.kind !== 'fix')) return c.json({ error: 'answer, expected and kind required' }, 400);
+  if (!answer || !expected || (body.kind !== 'translate' && body.kind !== 'fix' && body.kind !== 'cloze')) return c.json({ error: 'answer, expected and kind required' }, 400);
   if (sameText(language.script, answer, expected)) return c.json({ correct: true, feedback: 'Exactly right.', corrected: expected, judged: false });
   const pattern = lesson ? (JSON.parse(lesson.content_json) as LessonContent).pattern : '';
   const target = language.id === 'zh' ? 'Chinese' : language.name;
-  const task = body.kind === 'fix' ? `Correct this wrong sentence: ${body.task ?? ''}` : `Translate into ${target}: ${body.task ?? ''}`;
+  const task =
+    body.kind === 'fix'
+      ? `Correct this wrong sentence: ${body.task ?? ''}`
+      : body.kind === 'cloze'
+        ? // A review's fill-in-the-blank: judge the word or phrase in the blank, in this sentence.
+          `Fill in the blank (＿＿) with the right word or phrase. Mark only what goes in the blank: another word or form that is correct and natural here, with the same meaning, counts as right. ${body.task ?? ''}`
+        : `Translate into ${target}: ${body.task ?? ''}`;
   try {
     const out = await callStructured(c.env, {
       // Sonnet, not Haiku: marking needs judgement (ambiguous English, alternative phrasings).
@@ -410,7 +444,7 @@ const QuerySchema = z.object({ learnerRight: z.boolean(), keyWrong: z.boolean(),
 
 /**
  * "Query this mark": Sonnet re-checks one marked answer. A learner proved right on a lesson check
- * gets the mark back (and the pass, if that tips it); a wrong answer key is logged for fixing.
+ * gets the mark back (and the pass, if that tips it); a wrong answer key is corrected in the lesson.
  */
 lessonRoutes.post('/query', async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as {
@@ -437,7 +471,7 @@ lessonRoutes.post('/query', async (c) => {
   const note = str(b.note, 500);
   const question = [
     `Pattern: ${pattern}`,
-    `Question kind: ${kind === 'build' ? 'arrange word tiles into a sentence' : kind === 'fix' ? 'correct a wrong sentence' : kind === 'choice' ? 'multiple choice' : 'translate English into Chinese'}`,
+    `Question kind: ${kind === 'build' ? 'arrange word tiles into a sentence' : kind === 'fix' ? 'correct a wrong sentence' : kind === 'choice' ? 'multiple choice' : `translate English into ${getLanguage(lesson?.lang ?? 'zh')?.name ?? 'Chinese'}`}`,
     `Task: ${str(b.task)}`,
     options.length ? `Options: ${options.map((o, i) => `${i + 1}. ${o}`).join(' / ')}` : '',
     `Answer key: ${expected}`,
@@ -456,12 +490,15 @@ lessonRoutes.post('/query', async (c) => {
     return c.json(err, status);
   }
   const betterKey = verdict.keyWrong ? (getLanguage(lesson?.lang ?? 'zh')?.hasRomanisation ? stripPinyin(verdict.betterKey.trim()) : verdict.betterKey.trim()) : '';
-  await c.env.DB.prepare(
+  const logged = await c.env.DB.prepare(
     `INSERT INTO answer_queries(lesson_id, place, kind, task, expected, answer, marked_right, learner_note, learner_right, key_wrong, explanation, better_key)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) RETURNING id`,
   )
     .bind(lesson?.id ?? null, str(b.place, 40) || kind, kind, str(b.task), expected, answer, b.markedRight ? 1 : 0, note || null, verdict.learnerRight ? 1 : 0, verdict.keyWrong ? 1 : 0, verdict.explanation.trim(), betterKey || null)
-    .run();
+    .first<{ id: number }>();
+
+  // A wrong answer key is corrected in the lesson straight away, wherever the question appears.
+  const keyFixed = lesson && betterKey && logged ? await correctAnswerKey(c.env.DB, lesson, { kind: kind as WrongKey['kind'], task: str(b.task), expected, better: betterKey }, logged.id) : false;
 
   // On a lesson check, a mark won on query counts: rescore, and mark the lesson done if it now passes.
   let check = null;
@@ -479,8 +516,32 @@ lessonRoutes.post('/query', async (c) => {
       check = { ...s, passMark: mark, done, checkId: row.id };
     }
   }
-  return c.json({ learnerRight: verdict.learnerRight, keyWrong: verdict.keyWrong, explanation: verdict.explanation.trim(), betterKey, check });
+  return c.json({ learnerRight: verdict.learnerRight, keyWrong: verdict.keyWrong, explanation: verdict.explanation.trim(), betterKey, keyFixed, check });
 });
+
+/**
+ * Put a corrected answer key into the lesson (and the copies reviews use: its drills as grammar
+ * exercises, its errors as mistakes), if the question is found and the lesson stays valid. The
+ * query is then closed as fixed.
+ */
+async function correctAnswerKey(db: D1Database, lesson: LessonRow, key: WrongKey, queryId: number): Promise<boolean> {
+  const next = fixAnswerKey(JSON.parse(lesson.content_json) as LessonContent, key);
+  if (!next || validateLesson(next, getLanguage(lesson.lang)?.script ?? 'han').length) return false;
+  await db.batch([
+    db.prepare('UPDATE lessons SET content_json = ?1, content_md = ?2 WHERE id = ?3').bind(JSON.stringify(next), renderLessonMd(next), lesson.id),
+    db
+      .prepare(
+        `UPDATE OR IGNORE exercises SET zh = ?1 WHERE item_type = 'grammar_point' AND en = ?2 AND zh = ?3
+           AND item_id IN (SELECT id FROM grammar_points WHERE lesson_id = ?4)`,
+      )
+      .bind(key.better, key.task, key.expected, lesson.id),
+    db
+      .prepare(`UPDATE mistakes SET right = ?1 WHERE wrong = ?2 AND right = ?3 AND grammar_point_id IN (SELECT id FROM grammar_points WHERE lesson_id = ?4)`)
+      .bind(key.better, key.task, key.expected, lesson.id),
+    db.prepare("UPDATE answer_queries SET status = 'fixed' WHERE id = ?1").bind(queryId),
+  ]);
+  return true;
+}
 
 lessonRoutes.post('/:id{[0-9]+}/undone', async (c) => {
   await c.env.DB.prepare('UPDATE lessons SET completed_at = NULL WHERE id = ?1').bind(Number(c.req.param('id'))).run();
@@ -519,7 +580,7 @@ lessonRoutes.post('/generate', async (c) => {
 
   let lesson: LessonContent;
   try {
-    lesson = toLessonContent(await callStructured(c.env, {
+    const draft = await callStructured(c.env, {
       role: 'lessons',
       system: [promptsFor(lang).lesson],
       messages: [{ role: 'user', content: request }],
@@ -527,7 +588,8 @@ lessonRoutes.post('/generate', async (c) => {
       effort: 'medium',
       schema: LessonSchema,
       extraCheck: (v) => validateLesson(toLessonContent(v), language.script),
-    }));
+    });
+    lesson = toLessonContent(await proofreadLesson(c.env, language, draft));
   } catch (e) {
     if (e instanceof StructuredOutputError) return c.json({ error: 'generation_failed', detail: e.message }, 502);
     const { status, body: err } = claudeErrorResponse(e);

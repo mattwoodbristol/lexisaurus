@@ -75,7 +75,8 @@ export function QueryButton({ ctx, ann, mode, onRight }: ZhProps & { ctx: QueryC
         </div>
         {res.keyWrong && (
           <div class="small">
-            The answer key looks wrong and has been logged for fixing{res.betterKey ? ': ' : '.'}
+            {res.keyFixed ? 'The answer key was wrong and has been corrected in the lesson' : 'The answer key looks wrong and has been noted (see Settings → Flagged)'}
+            {res.betterKey ? ': ' : '.'}
             {res.betterKey && <Zh text={res.betterKey} ann={ann} mode={mode} />}
           </div>
         )}

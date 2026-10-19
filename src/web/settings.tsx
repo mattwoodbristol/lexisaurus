@@ -12,6 +12,7 @@ import { NATIVE_LANGUAGES } from '../core/languages/native';
 import { DEFAULT_NOTIFY_TIMES } from '../core/notify/schedule';
 import { stepCounts } from '../core/lessons/steps';
 import { allLanguages, setEnabledLanguages, useStudyLang } from './lang';
+import { Flagged } from './page-query';
 import { DEFAULT_RATE, SPEECH_RATES, setAutoplay, setSpeechRate, speak } from './speech';
 
 interface Form {
@@ -525,6 +526,8 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
           Download backup
         </a>
       </div>
+
+      <Flagged />
 
       <div class="card">
         <strong>Support Lexisaurus</strong>

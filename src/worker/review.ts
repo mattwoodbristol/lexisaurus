@@ -17,7 +17,7 @@ import { tidyListGloss } from '../core/words/gloss';
 import { boardGloss } from '../core/assessment/sort-board';
 import { withChoices } from '../core/review/choices';
 import type { StoredStatus } from '../core/pinyin/annotate';
-import { promptsFor } from '../../prompts';
+import { promptsFor, proofreadSentencesPrompt } from '../../prompts';
 import { getLanguage } from '../core/languages';
 import { dayStartIso, poolMaxBand } from './day';
 
@@ -55,21 +55,94 @@ async function setting<T>(db: D1Database, key: string, fallback: T): Promise<T> 
   }
 }
 
+type SentenceItem = { word: string; form?: string; zh: string; en: string };
+
+/** Words the learner knows, simplest first: all an example sentence may use besides its target. */
+async function knownWords(db: D1Database, lang: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT lemma FROM words WHERE lang = ?1 AND status IN ('known', 'learning')
+       ORDER BY status = 'known' DESC, COALESCE(json_extract(meta_json, '$.hsk'), 99), id LIMIT 400`,
+    )
+    .bind(lang)
+    .all<{ lemma: string }>();
+  return results.map((r) => r.lemma);
+}
+
+/** Below this many known words, the list says too little to hold sentences to it. */
+const KNOWN_ENOUGH = 150;
+
+/**
+ * Words in each sentence, besides its target, that the learner's list does not have as known or
+ * learning (Chinese, where the list is matched word for word; Latin-script forms are not).
+ */
+async function extraNewWords(db: D1Database, lang: string, items: SentenceItem[]): Promise<Map<SentenceItem, string[]>> {
+  const ann = await annotateStrings(db, lang, items.map((i) => i.zh));
+  const out = new Map<SentenceItem, string[]>();
+  for (const it of items) {
+    const extra = (ann[it.zh] ?? [])
+      .filter((t) => t.pinyin && (t.status === 'new' || t.status === 'unknown'))
+      .map((t) => t.text)
+      .filter((w) => !it.word.includes(w) && !w.includes(it.word));
+    if (extra.length) out.set(it, [...new Set(extra)]);
+  }
+  return out;
+}
+
+/** A second pass by a stronger model: correct language, translation and vocabulary. Keeps the originals on failure. */
+async function proofreadSentences(env: Env, lang: string, items: SentenceItem[], known: string[], problems?: Map<SentenceItem, string[]>): Promise<SentenceItem[]> {
+  const language = getLanguage(lang) ?? getLanguage('zh')!;
+  const latin = language.script === 'latin';
+  const content = [
+    `Items:\n${JSON.stringify({ items })}`,
+    known.length ? `Words the learner knows:\n${known.join(', ')}` : 'No word list: allow only the most common everyday words besides the target.',
+    problems?.size ? `Problems found (words the learner does not know):\n${[...problems].map(([it, w]) => `${it.word}: ${w.join(', ')}`).join('\n')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const call = { role: 'checking' as const, effort: 'low' as const, system: [proofreadSentencesPrompt(language.name, latin)], messages: [{ role: 'user' as const, content }], maxTokens: 3000 };
+  try {
+    const out: SentenceItem[] = latin ? (await callStructured(env, { ...call, schema: ExerciseBatchLatin })).items : (await callStructured(env, { ...call, schema: ExerciseBatch })).items;
+    const byWord = new Map(out.map((o) => [o.word.trim(), o]));
+    return items.map((it) => byWord.get(it.word.trim()) ?? it);
+  } catch (e) {
+    // Out of budget too: the sentences are already paid for, so they are kept rather than lost.
+    console.error('proofreading sentences failed', e);
+    return items;
+  }
+}
+
 /** Generate and cache one sentence for each word lacking one. Degrades silently on budget/key errors. */
 async function ensureWordSentences(env: Env, lang: string, words: { id: number; lemma: string }[]): Promise<string | null> {
   if (words.length === 0) return null;
   try {
     const language = getLanguage(lang);
     const latin = language?.script === 'latin';
+    const known = await knownWords(env.DB, lang);
     const call = {
       role: 'exercises' as const,
       system: [promptsFor(lang).exercises],
-      messages: [{ role: 'user' as const, content: `Target words:\n${words.map((w) => w.lemma).join('\n')}` }],
+      messages: [
+        {
+          role: 'user' as const,
+          content: `Target words:\n${words.map((w) => w.lemma).join('\n')}${known.length ? `\n\nWords the learner knows (use only these besides the target):\n${known.join(', ')}` : ''}`,
+        },
+      ],
       maxTokens: 2000,
     };
-    const items: { word: string; form?: string; zh: string; en: string }[] = latin
+    let items: SentenceItem[] = latin
       ? (await callStructured(env, { ...call, schema: ExerciseBatchLatin })).items
       : (await callStructured(env, { ...call, schema: ExerciseBatch })).items;
+    // Checked before the learner sees them, and held to one new word: the target.
+    items = await proofreadSentences(env, lang, items, known);
+    if (!latin && known.length >= KNOWN_ENOUGH) {
+      const problems = await extraNewWords(env.DB, lang, items);
+      if (problems.size) {
+        const fixed = await proofreadSentences(env, lang, [...problems.keys()], known, problems);
+        const byWord = new Map(fixed.map((f) => [f.word.trim(), f]));
+        items = items.map((it) => (problems.has(it) ? (byWord.get(it.word.trim()) ?? it) : it));
+      }
+    }
     const byWord = new Map(words.map((w) => [w.lemma, w.id]));
     const stmts: D1PreparedStatement[] = [];
     for (const it of items) {
@@ -143,6 +216,23 @@ async function topUpFromPool(db: D1Database, lang: string, want: number, nowIso:
   );
 }
 
+/**
+ * Cards a review would show now: due cards already seen, plus as many unseen word cards as today's
+ * new-word allowance (review.new_per_day) has left, which is how the review rations them. Counting
+ * every due card instead promised reviews the review would not show.
+ */
+export async function dueNow(db: D1Database, lang: string): Promise<number> {
+  const now = new Date().toISOString();
+  const newPerDay = Math.max(0, Number(await setting(db, 'review.new_per_day', DEFAULT_NEW_PER_DAY)) || 0);
+  const left = Math.max(0, newPerDay - (await introducedToday(db, lang)));
+  if (left) await topUpFromPool(db, lang, left, now);
+  const row = await db
+    .prepare(`SELECT COALESCE(SUM(NOT ${UNSEEN_WORD}), 0) AS seen, COALESCE(SUM(${UNSEEN_WORD}), 0) AS unseen FROM srs_cards s WHERE s.lang = ?1 AND s.due_at <= ?2`)
+    .bind(lang, now)
+    .first<{ seen: number; unseen: number }>();
+  return (row?.seen ?? 0) + Math.min(row?.unseen ?? 0, left);
+}
+
 /** Unseen word cards introduced since the start of today (learner's time zone). */
 export async function introducedToday(db: D1Database, lang: string): Promise<number> {
   const r = await db
@@ -166,7 +256,6 @@ reviewRoutes.get('/summary', async (c) => {
   const startOfDay = await dayStartIso(c.env.DB);
   const row = await c.env.DB.prepare(
     `SELECT
-       (SELECT COUNT(*) FROM srs_cards WHERE lang = ?1 AND due_at <= ?2) AS due,
        (SELECT COUNT(*) FROM srs_cards WHERE lang = ?1 AND due_at <= ?2 AND item_type = 'grammar_point') AS due_grammar,
        (SELECT COUNT(*) FROM srs_cards WHERE lang = ?1) AS cards,
        (SELECT COUNT(*) FROM reviews r CROSS JOIN srs_cards s ON s.id = r.card_id WHERE s.lang = ?1 AND r.reviewed_at >= ?3) AS reviewed_today,
@@ -175,10 +264,11 @@ reviewRoutes.get('/summary', async (c) => {
        (SELECT COALESCE(SUM(n), 0) FROM word_counts WHERE lang = ?1 AND status = 'new') AS pool`,
   )
     .bind(lang, now, startOfDay)
-    .first<{ due: number; reviewed_today: number }>();
+    .first<{ reviewed_today: number }>();
+  const due = await dueNow(c.env.DB, lang);
   const limit = Number(await setting(c.env.DB, 'review.daily_limit', 60)) || 60;
-  const remainingToday = row ? Math.max(0, Math.min(row.due, limit - row.reviewed_today)) : 0;
-  return c.json({ ...row, daily_limit: limit, remaining_today: remainingToday });
+  const remainingToday = row ? Math.max(0, Math.min(due, limit - row.reviewed_today)) : 0;
+  return c.json({ ...row, due, daily_limit: limit, remaining_today: remainingToday });
 });
 
 /** Words known in a language (Lexi's stage), from the running totals (word_counts, kept by triggers). */
@@ -282,12 +372,13 @@ reviewRoutes.get('/next', async (c) => {
   const asChoice = (ex: Exercise, d: DueRow, seed: number): Exercise => {
     if (ex.kind === 'zh_to_en' && ex.answerEn) {
       const choices = withChoices(ex.answerEn, enPool, seed);
-      return choices ? { ...ex, choices } : ex;
+      return choices ? { ...ex, choices, choiceAnswer: ex.answerEn } : ex;
     }
-    if (ex.kind === 'flash' && d.item_type === 'word' && glossed(d)) {
-      const answerEn = shortGloss(d.gloss!);
-      const choices = withChoices(answerEn, glossPool, seed);
-      return choices ? { ...ex, answerEn, choices } : ex;
+    // A word on its own, or met for the first time: pick its meaning (a new word is taught only if missed).
+    if ((ex.kind === 'flash' || ex.kind === 'intro') && d.item_type === 'word' && glossed(d)) {
+      const meaning = shortGloss(d.gloss!);
+      const choices = withChoices(meaning, glossPool, seed);
+      return choices ? { ...ex, ...(ex.kind === 'flash' ? { answerEn: meaning } : {}), choices, choiceAnswer: meaning } : ex;
     }
     return ex;
   };
@@ -324,6 +415,11 @@ reviewRoutes.post('/:cardId{[0-9]+}', async (c) => {
   if (!isRating(body.rating)) return c.json({ error: 'rating must be 1-4' }, 400);
   const row = await c.env.DB.prepare('SELECT * FROM srs_cards WHERE id = ?1').bind(cardId).first<{ id: number; item_type: string; item_id: number; lang: string; fsrs_state_json: string; pinned: number }>();
   if (!row) return c.json({ error: 'not found' }, 404);
+  // A double tap rates a card twice within moments: keep the first only.
+  const recent = await c.env.DB.prepare("SELECT 1 AS x FROM reviews WHERE card_id = ?1 AND reviewed_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 seconds') LIMIT 1")
+    .bind(cardId)
+    .first<{ x: number }>();
+  if (recent) return c.json({ due: (await c.env.DB.prepare('SELECT due_at FROM srs_cards WHERE id = ?1').bind(cardId).first<{ due_at: string }>())?.due_at ?? '', status: null, statusChanged: false, duplicate: true });
 
   const now = new Date();
   const before = parseCard(row.fsrs_state_json);

@@ -330,6 +330,8 @@ button.icon.tiny.on { background: var(--accent); color: var(--on-accent); }
 .spoken { margin-top: 6px; }
 .spoken-parts { font-size: 1.15rem; }
 .spoken-parts .missed { color: var(--danger); text-decoration: underline wavy; text-underline-offset: 4px; }
+.spoken-parts .close { color: #a86b00; text-decoration: underline dotted; text-underline-offset: 4px; }
+@media (prefers-color-scheme: dark) { .spoken-parts .close { color: #e0a73a; } }
 
 /* Listening practice */
 button.chip { min-height: 36px; padding: 4px 12px; color: var(--fg); border: 1px solid transparent; font-size: 0.95rem; }
@@ -355,3 +357,8 @@ button.chip.on { background: var(--accent); color: var(--on-accent); }
 
 /* The build at the foot of every screen, clear of the ⚑ button. */
 .app-version { text-align: center; font-size: 0.75rem; opacity: 0.5; margin: 24px 56px 16px; }
+/* The word being tested, in its sentence. */
+.w.tested { font-weight: 700; color: var(--accent); }
+.flagged li { display: grid; gap: 2px; padding: 8px 0; border-bottom: 1px solid rgba(127,127,127,0.2); }
+.flagged details summary { cursor: pointer; }
+.flagged button { justify-self: start; margin-top: 4px; }

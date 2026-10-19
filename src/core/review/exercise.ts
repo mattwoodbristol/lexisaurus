@@ -26,8 +26,12 @@ export interface Exercise {
   answerEn?: string;
   /** The word being tested as it appears in the prompt (an inflected form in Latin scripts). */
   target?: string;
-  /** Multiple choice (zh_to_en, and flash for a word with a meaning): `answerEn` among wrong options. */
+  /**
+   * Multiple choice: `choiceAnswer` among wrong options. zh_to_en: the sentence's meaning; flash
+   * and intro: the word's meaning (an intro tests first and teaches the word only if missed).
+   */
   choices?: string[];
+  choiceAnswer?: string;
   /** For grammar reviews of lessons with practice sets: a three-question quiz, scored automatically. */
   quiz?: LessonCheckItem[];
   lessonId?: number;
@@ -59,7 +63,7 @@ export function kindFor(reps: number, hasSentence: boolean, isWord: boolean, sal
 }
 
 export function makeExercise(kind: ExerciseKind, s: Sentence | undefined): Exercise {
-  if (kind === 'intro') return s ? { kind, sentenceId: s.id, promptZh: s.zh, answerEn: s.en } : { kind };
+  if (kind === 'intro') return s ? { kind, sentenceId: s.id, promptZh: s.zh, answerEn: s.en, ...(s.target ? { target: s.target } : {}) } : { kind };
   if (kind === 'match') return { kind };
   // A quiz is built from the lesson, not from a cached sentence (see the review route).
   if (!s || kind === 'flash' || kind === 'quiz') return { kind: 'flash' };

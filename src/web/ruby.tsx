@@ -20,6 +20,7 @@ export function RubyText({
   big = false,
   tap = true,
   lang,
+  mark: markWord,
 }: {
   tokens: Token[];
   mode: PinyinMode;
@@ -27,6 +28,8 @@ export function RubyText({
   big?: boolean;
   tap?: boolean | ((t: Token) => boolean);
   lang?: string;
+  /** Words to pick out (the word being tested, in its sentence). */
+  mark?: (t: Token) => boolean;
 }) {
   const ctxLang = useContext(LangContext);
   const id = lang ?? ctxLang;
@@ -47,7 +50,7 @@ export function RubyText({
         // Words not in the list are underlined only where the list is meant to cover them (Mandarin).
         const mark = t.status !== 'unknown' || config.markUnknownWords;
         const canTap = typeof tap === 'function' ? tap(t) : tap;
-        const cls = `w${mark ? ` w-${t.status}` : ''}${canTap ? ' tap' : ' locked'}`;
+        const cls = `w${mark ? ` w-${t.status}` : ''}${canTap ? ' tap' : ' locked'}${markWord?.(t) ? ' tested' : ''}`;
         const props = canTap ? { onClick: open(t), onKeyDown: onKey(t), role: 'button' as const, tabIndex: 0 } : {};
         if (force || showPinyin(t, mode)) {
           return (
@@ -75,6 +78,7 @@ export function Zh({
   force,
   big,
   tap,
+  mark,
 }: {
   text: string;
   ann: Record<string, Token[]>;
@@ -82,9 +86,10 @@ export function Zh({
   force?: boolean;
   big?: boolean;
   tap?: boolean | ((t: Token) => boolean);
+  mark?: (t: Token) => boolean;
 }) {
   const tokens = ann[text];
-  return tokens ? <RubyText tokens={tokens} mode={mode} force={force} big={big} tap={tap} /> : <span>{text}</span>;
+  return tokens ? <RubyText tokens={tokens} mode={mode} force={force} big={big} tap={tap} mark={mark} /> : <span>{text}</span>;
 }
 
 /** The persisted per-language pinyin mode, shared by chat, lessons and review. */

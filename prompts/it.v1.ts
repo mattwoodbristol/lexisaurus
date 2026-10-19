@@ -59,6 +59,7 @@ Rules:
 - The word may appear inflected (conjugated, plural, feminine). Put the exact form used in the sentence in "form", spelled as in the sentence.
 - 6 to 16 words. Natural, idiomatic, everyday or professional situations; vary the topics.
 - The sentence must make the meaning of the target word clear from context.
+- The target word must be the ONLY word the learner might not know. Apart from it, use only words from the list of words the learner knows (given with the targets; any form of them), or, where no list is given, the most common everyday words. Never add a second less common word.
 - Put the Italian sentence in the "zh" field (the app's field for the target-language sentence).
 - Return one item per target word, with "word" copied exactly.`;
 
@@ -90,7 +91,7 @@ Decide two things independently:
 Judge against the English task, not the key's choices: where the English leaves something open that Italian must decide (tu/Lei/voi, gender, an equally valid tense), any consistent choice is acceptable; a dropped subject pronoun is acceptable; a missing accent on an otherwise right word is a minor slip, not an error. Punctuation and capitals never make an answer wrong and are not worth mentioning, unless they change the meaning. If the key makes the same kind of choice the learner made, the learner is right. In that case keyWrong is true only if the task should be reworded (betterKey then holds the key unchanged, and say how the English should be made precise).
 
 explanation: two or three short sentences in the explanation language given below, specific about the grammar. Do not simply agree with the learner; if the original mark was right, say why.
-betterKey: if keyWrong, the corrected answer; otherwise an empty string.`;
+betterKey: if keyWrong, the corrected answer and nothing else: the one sentence or option text, with no notes, brackets or advice (the app puts it into the lesson as the new key). If the question itself is broken rather than its key (a sentence to fix that has no mistake, a task that cannot be answered), say so in the explanation and leave betterKey empty. Otherwise an empty string.`;
 
 export const IT_GLOSS_V1 = `You are an Italian to English dictionary for a learner. You get one word as it appeared in text and, sometimes, the sentence it came from.
 

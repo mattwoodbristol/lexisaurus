@@ -46,3 +46,10 @@ describe('Latin-script rules (Italian)', () => {
     expect(sameText('latin', 'vado acasa', 'vado a casa')).toBe(false); // spaces matter
   });
 });
+
+describe('Italian elision', () => {
+  it("treats l' accordo as l'accordo", () => {
+    expect(sameText('latin', "Mi auguro che l' accordo regga.", "Mi auguro che l'accordo regga.")).toBe(true);
+    expect(sameText('latin', 'un po’ di più', "un po' di più")).toBe(true);
+  });
+});

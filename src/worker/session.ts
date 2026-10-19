@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { dayStartIso, getSetting, localToday } from './day';
-import { reviewedToday } from './review';
+import { dueNow, reviewedToday } from './review';
 import { enterLearntGrammar } from './lessons';
 import { suggestTopic } from './topics';
 import { getLanguage } from '../core/languages';
@@ -46,7 +46,7 @@ export async function computeSession(db: D1Database, lang: string): Promise<Dail
   const limit = Number(await getSetting(db, 'review.daily_limit', 60)) || 60;
   const needed = Number(await getSetting(db, 'session.min_chat_turns', 3)) || 3;
 
-  const due = (await db.prepare('SELECT COUNT(*) AS n FROM srs_cards WHERE lang = ?1 AND due_at <= ?2').bind(lang, now).first<{ n: number }>())?.n ?? 0;
+  const due = await dueNow(db, lang);
   const doneToday = await reviewedToday(db, lang);
   const remaining = Math.max(0, Math.min(due, limit - doneToday));
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compareSpoken, numberToZh, spokenRating } from '../src/core/speech/compare';
+import { compareSpoken, numberToZh, soundsFrom, spokenRating } from '../src/core/speech/compare';
 
 describe('numbers the recogniser writes as digits', () => {
   it('writes small numbers as Chinese numerals', () => {
@@ -64,5 +64,36 @@ describe('suggested rating', () => {
     expect(spokenRating(compareSpoken('han', '我想买书', ['我想买书']))).toBe(3);
     expect(spokenRating(compareSpoken('han', '我想买书', ['我想卖书']))).toBe(2);
     expect(spokenRating(compareSpoken('han', '我想买书', ['你好']))).toBe(1);
+  });
+});
+
+describe('allowing for the recogniser', () => {
+  const sounds = { 他: 'tā', 她: 'tā', 在: 'zài', 再: 'zài', 买: 'mǎi', 卖: 'mài', 我: 'wǒ', 想: 'xiǎng', 书: 'shū', 去: 'qù', 学: 'xué', 校: 'xiào' };
+  it('counts a character that sounds the same as heard', () => {
+    const r = compareSpoken('han', '她去学校', ['他去学校'], sounds);
+    expect(r.score).toBe(1);
+    expect(r.parts.every((p) => p.ok)).toBe(true);
+    expect(spokenRating(r)).toBe(3);
+  });
+  it('gives half for the same syllable in another tone', () => {
+    const r = compareSpoken('han', '我想买书', ['我想卖书'], sounds);
+    expect(r.score).toBe(0.875);
+    expect(r.parts[2]).toEqual({ text: '买', ok: false, close: true });
+  });
+  it('without sounds, compares characters as before', () => {
+    expect(compareSpoken('han', '她去学校', ['他去学校']).score).toBe(0.75);
+  });
+  it('ignores accents and apostrophes in Italian', () => {
+    expect(compareSpoken('latin', 'Perché è così?', ['perche e cosi']).match).toBe(true);
+  });
+  it('rates nearly all of it as Good', () => {
+    const r = compareSpoken('latin', 'uno due tre quattro cinque sei sette otto nove dieci', ['uno due tre quattro cinque sei sette otto nove'], undefined);
+    expect(r.score).toBe(0.9);
+    expect(spokenRating(r)).toBe(3);
+    expect(spokenRating(compareSpoken('latin', 'uno due tre quattro cinque', ['uno due tre']))).toBe(2);
+    expect(spokenRating(compareSpoken('latin', 'uno due tre quattro cinque', ['uno']))).toBe(1);
+  });
+  it('reads sounds from annotation tokens', () => {
+    expect(soundsFrom([{ text: '课堂', pinyin: 'kè táng' }, { text: '。' }, { text: '在', pinyin: 'zài' }])).toEqual({ 课: 'kè', 堂: 'táng', 在: 'zài' });
   });
 });

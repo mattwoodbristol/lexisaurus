@@ -6,7 +6,7 @@ import { stopSpeaking } from './speech';
 import { useLangConfig } from './lang';
 import { Zh } from './ruby';
 import { SpeechError, speechErrorText, type ListenOptions, type SpeechProvider } from '../core/speech/provider';
-import { compareSpoken, type SpokenResult } from '../core/speech/compare';
+import { compareSpoken, goodEnough, soundsFrom, type SpokenResult } from '../core/speech/compare';
 import type { Token } from '../core/pinyin/annotate';
 
 // The parts of the Web Speech recognition API used here (not in every TypeScript DOM lib).
@@ -192,7 +192,16 @@ export function SayIt({ target, label = 'Say it', onResult }: { target: string; 
             if (config.hasRomanisation && !r.match)
               api
                 .annotateTexts(config.id, [target, r.heard])
-                .then((a) => setAnn(a.annotations))
+                .then((a) => {
+                  setAnn(a.annotations);
+                  // The recogniser may have written a character that sounds the same: count it.
+                  const sounds = soundsFrom([...(a.annotations[target] ?? []), ...(a.annotations[r.heard] ?? [])]);
+                  const better = compareSpoken(config.script, target, [r.heard], sounds);
+                  if (better.score > r.score) {
+                    setRes(better);
+                    onResult?.(better);
+                  }
+                })
                 .catch(() => {});
           }}
         />
@@ -200,14 +209,15 @@ export function SayIt({ target, label = 'Say it', onResult }: { target: string; 
       </div>
       {res && (
         <div class="spoken" role="status">
-          <div class="spoken-parts" aria-label={res.match ? 'Understood' : 'Parts not understood are marked'}>
-            {res.match ? '✓ ' : ''}
+          <div class="spoken-parts" aria-label={goodEnough(res) ? 'Understood' : 'Parts not understood are marked'}>
+            {goodEnough(res) ? '✓ ' : ''}
             {res.parts.map((p, i) => (
-              <span key={i} class={p.ok ? 'heard' : 'missed'}>
+              <span key={i} class={p.ok ? 'heard' : p.close ? 'close' : 'missed'} title={p.close ? 'Heard in another tone' : undefined}>
                 {p.text}
               </span>
             ))}
           </div>
+          {!res.match && goodEnough(res) && <div class="small muted">Close enough: speech recognition often mishears a word or two.</div>}
           {!res.match && (
             <div class="small">
               Heard: {res.heard ? <Zh text={res.heard} ann={ann} mode="all" force /> : <span class="muted">nothing</span>}

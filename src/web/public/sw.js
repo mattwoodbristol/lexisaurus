@@ -1,5 +1,5 @@
 /* Service worker: offline app shell + Web Push. Plain JS so it needs no bundling. */
-const SHELL_CACHE = 'lt-shell-v5'; // v5: icon URLs versioned so installed apps pick up the tabby icons
+const SHELL_CACHE = 'lt-shell-v6'; // v6: clears version-check copies an older worker cached
 const SHELL_URLS = ['/', '/manifest.webmanifest', '/icons/icon-192.png?v=2', '/icons/badge-96.png', '/fonts/figtree-latin.woff2', '/fonts/bricolage-grotesque-latin.woff2'];
 
 self.addEventListener('install', (event) => {
@@ -19,6 +19,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   // API: network only. Never cache personal data in the SW.
   if (url.pathname.startsWith('/api/')) return;
+  // The app's check for a new version (fresh.ts) must see the server's page, not this cache.
+  if (url.searchParams.has('fresh')) return;
   // Navigations: network first, fall back to the cached shell.
   if (req.mode === 'navigate') {
     event.respondWith(fetch(req).catch(() => caches.match('/')));

@@ -5,7 +5,7 @@ import { BLANK, type Exercise } from './exercise';
 export function autoplayText(ex: Exercise, word: { lemma: string | null } | undefined, revealed: boolean): string | null {
   if (!revealed) {
     if (ex.kind === 'zh_to_en') return ex.promptZh ?? null; // listening practice; the answer is English
-    if (ex.kind === 'intro') return word?.lemma ?? null; // nothing is being tested
+    if (ex.kind === 'intro') return word?.lemma ?? null; // the word itself; its meaning is what an intro tests
     return null; // cloze has a blank; en_to_zh and flash would give the answer away
   }
   if (ex.kind === 'cloze' && ex.clozeZh && ex.answerZh) return ex.clozeZh.replace(BLANK, ex.answerZh);

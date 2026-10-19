@@ -14,6 +14,7 @@ import { Lexi, useLexiStage } from './mascot/lexi';
 import type { Token } from '../core/pinyin/annotate';
 import { boardGloss } from '../core/assessment/sort-board';
 import { MatchBoardView, useMatchBoard, type MatchWord } from './match-board';
+import { useQueryContext } from './page-query';
 
 type Rating = 1 | 2 | 3 | 4;
 /** Words on a review matching board at once (plus one decoy meaning). */
@@ -75,21 +76,49 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
 
   const item = queue[0];
   const ex = item?.exercise;
+  // "Something looks wrong?" can fix what this card shows: the lesson a grammar quiz comes from,
+  // the word's meaning, the example sentence.
+  useQueryContext({ lessonId: ex?.kind === 'quiz' ? ex.lessonId : undefined, wordId: item?.itemType === 'word' ? item.itemId : undefined, sentenceId: ex?.sentenceId });
 
   /** Multiple choice marks itself: right is Good, wrong or "don't know" is Pass. */
   function choose(i: number) {
     setChosen(i);
-    setVerdict(i >= 0 && ex?.choices?.[i] === ex?.answerEn);
+    setVerdict(i >= 0 && ex?.choices?.[i] === ex?.choiceAnswer);
     setRevealed(true);
   }
+
+  // The card on screen, for answers that arrive after it may have moved on.
+  const onScreen = useRef<number | undefined>(undefined);
+  onScreen.current = item?.cardId;
+  /** Another answer judged right in a fill-in-the-blank (a synonym, another correct form). */
+  const [alsoRight, setAlsoRight] = useState<string | null>(null);
+  const [judging, setJudging] = useState(false);
 
   function reveal() {
-    if (ex?.kind === 'cloze' && ex.answerZh) setVerdict(sameText(config.script, typed, ex.answerZh));
     setRevealed(true);
+    if (ex?.kind !== 'cloze' || !ex.answerZh) return;
+    const exact = sameText(config.script, typed, ex.answerZh);
+    setVerdict(exact);
+    if (exact || !typed.trim()) return;
+    // Not the key: Claude judges whether it is right too (a synonym, another correct form).
+    const card = item?.cardId;
+    setJudging(true);
+    api
+      .grade(0, 'cloze', `Sentence: ${ex.clozeZh} (English: ${ex.promptEn ?? ''})`, ex.answerZh, typed.trim(), lang)
+      .then((g) => {
+        if (onScreen.current !== card || !g.correct) return;
+        setVerdict(true);
+        setAlsoRight(g.feedback);
+      })
+      .catch(() => {})
+      .finally(() => setJudging(false));
   }
 
+  // One rating per card: a quick second tap (or a double tap) must not rate it again.
+  const rating = useRef(false);
   async function rate(r: Rating, quiz?: { score: number; total: number }) {
-    if (!item) return;
+    if (!item || rating.current) return;
+    rating.current = true;
     try {
       const res = await api.answer(item.cardId, r, ex?.kind, ex?.sentenceId, quiz);
       if (res.lessonPassed) setPassed(item.grammar?.title ?? 'This grammar');
@@ -104,6 +133,7 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
       setRevealed(false);
       setTyped('');
       setVerdict(null);
+      setAlsoRight(null);
       setChosen(null);
       setSpoken(null);
       const rest = queue.slice(1);
@@ -111,13 +141,16 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
       else setQueue(rest);
     } catch (e) {
       setErr(errorText(e));
+    } finally {
+      rating.current = false;
     }
   }
 
   // Tapping a word would give the answer away, so words become tappable once the answer shows.
   const intro = ex?.kind === 'intro';
-  // An introduction shows everything at once; other cards hide the answer until revealed.
-  const shown = revealed || intro;
+  // An introduction without a test shows everything at once; other cards hide the answer until
+  // revealed. With a test (choices), a new word's meaning shows once it has been answered.
+  const shown = revealed || (intro && !ex?.choices);
 
   // Auto-play (setting review.autoplay): prompts as they appear, answers on reveal.
   const autoplay = useAutoplay() ?? false;
@@ -176,6 +209,11 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
     return !hidden.some((h) => h.includes(w) || w.includes(h));
   };
   const z = (s: string, big = false) => <Zh text={s} ann={ann} mode={mode} big={big} tap={shown || tapBefore} />;
+  /** The word being tested, picked out in its sentence. */
+  const tested = (t: Token) => {
+    const w = t.text.toLowerCase();
+    return hidden.some((h) => h === w || (w.length > 1 && h.includes(w)) || w.includes(h));
+  };
   const suggested: Rating | null = spoken ?? (verdict === null ? null : verdict ? 3 : 1);
 
   return (
@@ -288,10 +326,34 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
             <div class="prompt">{item.word ? z(item.word.lemma, true) : <span class="big">{item.grammar?.title}</span>}</div>
           )}
 
+          {intro && item.word && (
+            <div class="intro">
+              <div class="prompt">
+                <Zh text={item.word.lemma} ann={ann} mode={mode} force big /> <SpeakButton text={item.word.lemma} />
+              </div>
+              {shown && <div>{item.word.gloss ?? <span class="muted">No meaning in your word list yet: tap the word.</span>}</div>}
+              {/* Tested in its sentence: the English comes once answered. */}
+              {(shown || ex.choices) && ex.promptZh && (
+                <div class="intro-example">
+                  <div class="with-speak">
+                    <Zh text={ex.promptZh} ann={ann} mode={mode} tap={shown || tapBefore} mark={ex.choices ? tested : undefined} /> <SpeakButton text={ex.promptZh} small />
+                  </div>
+                  {shown && <div class="muted small">{ex.answerEn}</div>}
+                </div>
+              )}
+              {ex.choices && !shown && (
+                <p class="choice-prompt">
+                  What does {item.word.lemma} mean{ex.promptZh ? ' in this sentence' : ''}?
+                </p>
+              )}
+              {!ex.choices && <p class="muted small">Pass if it is new to you: it comes back in the next day or two. Good if you already know it.</p>}
+            </div>
+          )}
+
           {ex.choices && (
             <div class="choice">
               {ex.choices.map((o, i) => {
-                const state = !revealed ? '' : o === ex.answerEn ? 'right' : chosen === i ? 'wrong' : '';
+                const state = !revealed ? '' : o === ex.choiceAnswer ? 'right' : chosen === i ? 'wrong' : '';
                 return (
                   <button key={i} class={`option ${state}`} disabled={revealed} onClick={() => choose(i)}>
                     {o}
@@ -306,32 +368,21 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
             </div>
           )}
 
-          {intro && item.word && (
-            <div class="intro">
-              <div class="prompt">
-                <Zh text={item.word.lemma} ann={ann} mode={mode} force big /> <SpeakButton text={item.word.lemma} />
-              </div>
-              <div>{item.word.gloss ?? <span class="muted">No meaning in your word list yet: tap the word.</span>}</div>
-              {ex.promptZh && (
-                <div class="intro-example">
-                  <div class="with-speak">{z(ex.promptZh)} <SpeakButton text={ex.promptZh} small /></div>
-                  <div class="muted small">{ex.answerEn}</div>
-                </div>
-              )}
-              <p class="muted small">Pass if it is new to you: it comes back in the next day or two. Good if you already know it.</p>
-            </div>
-          )}
-
           {ex.kind === 'quiz' || matching ? null : shown ? (
             <div class="answer">
               {ex.kind === 'cloze' && (
                 <div class={verdict ? 'right' : 'wrong'}>
                   {verdict ? '✓ ' : '✗ '}
                   {z(ex.answerZh!, true)} <SpeakButton text={ex.clozeZh!.replace(BLANK, ex.answerZh!)} small />
-                  {!verdict && typed && <span class="muted small"> (you wrote {typed})</span>}
+                  {!verdict && typed && <span class="muted small"> (you wrote {typed}{judging ? '; checking whether that is right too…' : ''})</span>}
+                  {alsoRight && (
+                    <div class="small">
+                      Your answer, {typed}, is right too. <span class="muted">{alsoRight}</span>
+                    </div>
+                  )}
                 </div>
               )}
-              {ex.choices && <div class={verdict ? 'right' : 'wrong'}>{verdict ? '✓ Right' : chosen === -1 ? 'It comes back soon.' : '✗ Not quite'}</div>}
+              {ex.choices && <div class={verdict ? 'right' : intro ? 'muted' : 'wrong'}>{verdict ? (intro ? '✓ You know this one.' : '✓ Right') : intro ? 'New to you: it comes back in the next day or two.' : chosen === -1 ? 'It comes back soon.' : '✗ Not quite'}</div>}
               {ex.kind === 'zh_to_en' && !ex.choices && <div>{ex.answerEn}</div>}
               {/* Shadowing: repeat the sentence after hearing it. */}
               {(ex.kind === 'zh_to_en' || ex.kind === 'cloze') && (
@@ -352,7 +403,8 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
                 ))}
               {item.word && ex.kind !== 'flash' && !intro && (
                 <div class="muted small">
-                  {item.word.lemma} · {item.word.reading}
+                  {item.word.lemma}
+                  {item.word.reading ? ` · ${item.word.reading}` : ''}
                   {item.word.gloss ? ` · ${item.word.gloss}` : ''}
                 </div>
               )}

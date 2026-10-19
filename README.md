@@ -239,9 +239,10 @@ screen says when a copy has fallen behind (`/api/updates`).
 ### Deploying on push
 
 To deploy on every push to `main` from a Worker deployed by hand, connect the repository in the
-Cloudflare dashboard (the Worker → Settings → Builds) with branch `main`, build command left
-empty and deploy command `npm run deploy` (it builds the PWA and applies migrations; plain
-`npx wrangler deploy` would skip both). The Worker's name must match `name` in
+Cloudflare dashboard (the Worker → Settings → Build) with branch `main`, build command
+`npm run build` and deploy command `npm run db:migrate && npx wrangler deploy`. The default
+deploy command, plain `npx wrangler deploy`, skips the database migrations, so new tables never
+appear. The Worker's name must match `name` in
 `wrangler.jsonc`. The version at the foot of every screen shows the build date and commit.
 
 The Worker serves the built PWA as static assets with SPA fallback and runs first only for

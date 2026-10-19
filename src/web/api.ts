@@ -4,6 +4,7 @@ import type { NextLesson } from '../core/lessons/steps';
 export type { NextLesson };
 import type { Token } from '../core/pinyin/annotate';
 import type { LessonContent } from '../core/lessons/types';
+import type { LessonFix } from '../core/lessons/fix';
 import type { StepKey, WarmupItem } from '../core/lessons/steps';
 import type { Mastery } from '../core/lessons/mastery';
 import type { Exercise } from '../core/review/exercise';
@@ -186,6 +187,12 @@ export interface CheckSubmitResult {
 }
 
 /** This copy's release and the latest published one (Home shows a note when it is behind). */
+/** One query, for Settings → Flagged: a lesson mark queried, or "Something looks wrong?". */
+export type FlaggedItem = { id: number; at: string; where: string; what: string; explanation: string; status: string } & (
+  | { source: 'mark'; answer: string; expected: string; learnerRight: boolean; keyWrong: boolean; better: string | null }
+  | { source: 'page'; contentWrong: boolean; canApply: boolean }
+);
+
 export interface UpdateStatus {
   current: string;
   latest: string | null;
@@ -197,7 +204,7 @@ export interface PageQueryResult {
   id: number;
   contentWrong: boolean;
   explanation: string;
-  fix: { explanation: string[] | null; examples: { zh: string; en: string }[] | null; drills: { zh: string; en: string }[] | null; keyPoints: string[] | null } | null;
+  fix: (LessonFix & { word?: { id: number; gloss: string }; sentence?: { id: number; zh: string; en: string; target: string } }) | null;
 }
 
 export interface QueryContext {
@@ -218,6 +225,8 @@ export interface QueryResult {
   keyWrong: boolean;
   explanation: string;
   betterKey: string;
+  /** The wrong key was corrected in the lesson. */
+  keyFixed?: boolean;
   check: CheckSubmitResult | null;
 }
 
@@ -306,11 +315,12 @@ export const api = {
   lessonUndone: (id: number) => request<{ ok: true }>(`/api/lessons/${id}/undone`, post()),
   lessonStep: (id: number, step: StepKey) => request<{ ok: true; stepsDone: StepKey[] }>(`/api/lessons/${id}/progress`, post({ step })),
   warmup: (id: number) => request<{ items: (WarmupItem & { lessonId: number; lessonTitle: string })[]; annotations: Record<string, Token[]> }>(`/api/lessons/${id}/warmup`),
-  grade: (lessonId: number, kind: 'translate' | 'fix', task: string, expected: string, answer: string) =>
-    request<GradeResult>('/api/lessons/grade', post({ lessonId, kind, task, expected, answer })),
+  grade: (lessonId: number, kind: 'translate' | 'fix' | 'cloze', task: string, expected: string, answer: string, lang?: string) =>
+    request<GradeResult>('/api/lessons/grade', post({ lessonId, kind, task, expected, answer, lang })),
   queryMark: (ctx: QueryContext & { note?: string }) => request<QueryResult>('/api/lessons/query', post(ctx)),
   updates: () => request<UpdateStatus>('/api/updates'),
-  queryPage: (q: { lang: string; screen: string; lessonId?: number; text: string; note: string }) => request<PageQueryResult>('/api/query-page', post(q)),
+  queryPage: (q: { lang: string; screen: string; lessonId?: number; wordId?: number; sentenceId?: number; text: string; note: string }) => request<PageQueryResult>('/api/query-page', post(q)),
+  flagged: (lang: string) => request<{ items: FlaggedItem[] }>(`/api/query-page/list?lang=${lang}`),
   applyPageFix: (id: number) => request<{ ok: true }>(`/api/query-page/${id}/apply`, post()),
   submitCheck: (id: number, results: { kind: string; right: boolean; answer: string }[]) => request<CheckSubmitResult>(`/api/lessons/${id}/check`, post({ results })),
   generateLesson: (lang: string, title?: string) => request<{ id: number; title: string }>('/api/lessons/generate', post({ lang, ...(title ? { title } : {}) })),

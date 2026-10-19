@@ -5,6 +5,7 @@ export { ZH_LESSON_PRACTICE_V1 } from './zh-lesson-practice.v1';
 export { GRADE_V1 } from './grade.v1';
 export { QUERY_V1 } from './query.v1';
 export { pageQueryPrompt } from './page-query.v1';
+export { proofreadSentencesPrompt, proofreadLessonPrompt } from './proofread.v1';
 export { ZH_EXERCISES_V1 } from './zh-exercises.v1';
 export { GLOSS_V1 } from './gloss.v1';
 export { COURSE_PLAN_V1 } from './course-plan.v1';

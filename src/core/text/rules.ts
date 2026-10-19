@@ -52,6 +52,7 @@ const latin: TextRules = {
       .replace(/[’‘`´]/g, "'")
       .replace(/[^\p{L}\p{M}\p{N}'\s]/gu, ' ')
       .replace(/\s+/g, ' ')
+      .replace(/' /g, "'") // an elided word runs on: l' accordo is l'accordo
       .trim(),
   key: (w) => w.normalize('NFC').toLowerCase().replace(/[’']$/, '').replace(/’/g, "'"),
   isLookup: (t) => {

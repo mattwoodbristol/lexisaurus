@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { App } from './app';
 import { WordSheet } from './word-sheet';
+import { reloadWhenUpdated } from './fresh';
 import './styles.css';
 
 render(
@@ -10,6 +11,8 @@ render(
   </>,
   document.getElementById('app')!,
 );
+
+reloadWhenUpdated();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
