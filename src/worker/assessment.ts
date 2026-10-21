@@ -10,8 +10,8 @@ import { pinyinForWord } from './pinyin';
 import { invalidateDict } from './words';
 import { levelCheck, type LevelCheck } from './level';
 import { markDone, type LessonRow } from './lessons';
-import { assessWordsPrompt, assessWritingPrompt, grammarBankPrompt, pseudoCheckPrompt, sortGlossPrompt, writingPrompt } from '../../prompts';
-import { BANDS, estimateGrammar, estimateVocab, lessonsBelow, levelText, sampleVocab, seededShuffle, bandLabel, type GrammarAnswer, type LevelResult, type ListWord } from '../core/assessment/levels';
+import { assessWordsPrompt, starterWordsPrompt, assessWritingPrompt, grammarBankPrompt, pseudoCheckPrompt, sortGlossPrompt, writingPrompt } from '../../prompts';
+import { BANDS, estimateGrammar, estimateVocab, lessonsBelow, levelText, sampleVocab, seededShuffle, bandLabel, starterBands, type GrammarAnswer, type LevelResult, type ListWord } from '../core/assessment/levels';
 import { getSetting, poolMaxBand } from './day';
 import { cleanGloss, tidyListGloss } from '../core/words/gloss';
 
@@ -132,8 +132,73 @@ assessmentRoutes.post('/:id{[0-9]+}/words', async (c) => {
   invalidateDict(lang);
   const est = estimateVocab(answers.map((x) => ({ band: x.band ?? 0, pseudo: !!x.pseudo, known: x.known === true })));
   await db.prepare('UPDATE assessments SET vocab_json = ?1 WHERE id = ?2').bind(JSON.stringify(est), id).run();
+  // A new language's pool is empty, or holds only the check's words: fill it at the measured level
+  // while the rest of the check runs.
+  c.executionCtx.waitUntil(fillStarterPool(c.env, lang, est.band));
   return c.json({ ...est, label: bandLabel(lang, est.band) });
 });
+
+/** Fewer unsorted new words than this at the learner's level (and the next) and the pool gets more. */
+const STARTER_MIN = 40;
+/** Starter words asked for per band. */
+const STARTER_PER_BAND = 30;
+
+/**
+ * Keep the pool stocked at the learner's level (cron): once a level check has measured it, a pool
+ * running low on unsorted words there gets more. Also covers a fill after the check that was cut
+ * short (it runs after the response, where time is limited).
+ */
+export async function topUpStarterPool(env: Env, lang: string): Promise<void> {
+  const check = await levelCheck(env.DB, lang);
+  if (check && check.vocab !== null) await fillStarterPool(env, lang, check.vocab);
+}
+
+/**
+ * Give the pool common words at the measured band and the next one up when it has few unsorted
+ * ones, so reviews introduce everyday words at the learner's level rather than whatever the check
+ * turned up, and Sort my words has words to sort.
+ */
+async function fillStarterPool(env: Env, lang: string, band: number): Promise<void> {
+  const language = getLanguage(lang);
+  if (!language) return;
+  const db = env.DB;
+  const bands = starterBands(band);
+  try {
+    const have = await db
+      .prepare(`SELECT COUNT(*) AS n FROM words WHERE lang = ?1 AND status = 'new' AND triaged_at IS NULL AND level IN (${bands.join(',')})`)
+      .bind(lang)
+      .first<{ n: number }>();
+    if ((have?.n ?? 0) >= STARTER_MIN) return;
+    const { results: listed } = await db
+      .prepare(`SELECT lemma FROM words WHERE lang = ?1 AND level IN (${bands.join(',')}) ORDER BY id DESC LIMIT 600`)
+      .bind(lang)
+      .all<{ lemma: string }>();
+    const out = await callStructured(env, {
+      role: 'exercises',
+      system: [starterWordsPrompt(language.name, lang)],
+      messages: [
+        {
+          role: 'user',
+          content: [`words: ${bands.map((b) => `band ${b}: ${STARTER_PER_BAND}`).join(', ')}`, listed.length ? `Excluded words: ${listed.map((w) => w.lemma).join(', ')}` : ''].filter(Boolean).join('\n'),
+        },
+      ],
+      maxTokens: 120 + bands.length * STARTER_PER_BAND * 25,
+      schema: z.object({ words: z.array(z.object({ band: z.number().int(), word: z.string(), gloss: z.string() })) }),
+    });
+    const stmts = out.words
+      .filter((w) => bands.includes(w.band) && w.word.trim() && w.gloss.trim())
+      .map((w) =>
+        db
+          .prepare(`INSERT INTO words(lang, lemma, reading, gloss, source, status, level) VALUES (?1, ?2, ?3, ?4, 'manual', 'new', ?5) ON CONFLICT(lang, lemma) DO NOTHING`)
+          .bind(lang, w.word.trim(), language.hasRomanisation ? pinyinForWord(w.word.trim()) : null, cleanGloss(w.gloss), w.band),
+      );
+    if (stmts.length) await db.batch(stmts);
+    invalidateDict(lang);
+  } catch (e) {
+    // No key or budget: the pool fills from lessons and chats as before.
+    console.error('starter pool failed', e);
+  }
+}
 
 /** The grammar question bank for a language, written once (Sonnet) and kept. */
 assessmentRoutes.get('/grammar', async (c) => {

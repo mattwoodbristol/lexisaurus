@@ -35,6 +35,8 @@ export interface Exercise {
   /** For grammar reviews of lessons with practice sets: a three-question quiz, scored automatically. */
   quiz?: LessonCheckItem[];
   lessonId?: number;
+  /** The sentence is part `part` of `of` of the batch's story; `prev` is the story so far (linesBefore). */
+  story?: { title: string; part: number; of: number; prev?: { id?: number; zh: string; en: string }[] };
 }
 
 export const BLANK = '＿＿';
@@ -77,6 +79,22 @@ export function makeExercise(kind: ExerciseKind, s: Sentence | undefined): Exerc
     case 'en_to_zh':
       return { kind, sentenceId: s.id, promptEn: s.en, answerZh: s.zh };
   }
+}
+
+/**
+ * The exercise with a corrected sentence ("Something looks wrong?"), when it shows that sentence
+ * (or the one before it in its story). Multiple choice keeps its options, with the new meaning
+ * in place of the old one.
+ */
+export function withFixedSentence(ex: Exercise, s: Sentence): Exercise {
+  const prev = ex.story?.prev?.some((l) => l.id === s.id) ? { ...ex, story: { ...ex.story, prev: ex.story.prev.map((l) => (l.id === s.id ? { id: s.id, zh: s.zh, en: s.en } : l)) } } : ex;
+  if (ex.sentenceId !== s.id) return prev;
+  const made = makeExercise(ex.kind, s);
+  if (made.kind !== ex.kind) return prev;
+  const story = prev.story ? { story: prev.story } : {};
+  if (!ex.choices) return { ...made, ...story };
+  if (ex.kind === 'zh_to_en') return { ...made, ...story, choices: ex.choices.map((c) => (c === ex.choiceAnswer ? made.answerEn! : c)), choiceAnswer: made.answerEn! };
+  return { ...made, ...story, choices: ex.choices, ...(ex.choiceAnswer ? { choiceAnswer: ex.choiceAnswer } : {}) };
 }
 
 /** Normalise a typed Chinese answer: drop spaces and punctuation, full-width forms. */

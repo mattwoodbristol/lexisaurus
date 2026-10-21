@@ -67,13 +67,14 @@ export async function computeSession(db: D1Database, lang: string): Promise<Dail
     ? { cardId: nextG.card_id, pointId: nextG.point_id, title: nextG.title, summary: nextG.summary, lessonId: nextG.lesson_id, done: !!reviewedG }
     : null;
 
-  // Lesson: any step saved, check taken or lesson marked done today counts.
+  // Lesson: any step saved, check taken or lesson marked done today counts (a review quiz passing
+  // a lesson check, or lessons skipped after the level check, do not).
   const lessonRow = await db
     .prepare(
       `SELECT
          EXISTS (SELECT 1 FROM lesson_progress p JOIN lessons l ON l.id = p.lesson_id WHERE l.lang = ?1 AND p.updated_at >= ?2)
            OR EXISTS (SELECT 1 FROM lesson_checks k JOIN lessons l ON l.id = k.lesson_id WHERE l.lang = ?1 AND k.created_at >= ?2)
-           OR EXISTS (SELECT 1 FROM lessons WHERE lang = ?1 AND completed_at >= ?2) AS done,
+           AS done,
          (SELECT title FROM lessons WHERE lang = ?1 AND course_no IS NOT NULL AND completed_at IS NULL ORDER BY course_no LIMIT 1) AS next`,
     )
     .bind(lang, start)

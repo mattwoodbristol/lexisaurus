@@ -147,3 +147,17 @@ export function levelText(lang: string, r: LevelResult): string {
 export function lessonsBelow(lessons: { id: number; level: string | null; completed: boolean }[], grammarBand: number): number[] {
   return lessons.filter((l) => !l.completed && (parseBand(l.level) ?? 99) < grammarBand).map((l) => l.id);
 }
+
+/**
+ * The highest band of new words within reach of a measured vocabulary band: its own band and the
+ * next one up. Words above it wait in the pool until the learner gets there.
+ */
+export function reachBand(vocab: number): number {
+  return Math.min(6, Math.max(1, Math.round(vocab) + 1));
+}
+
+/** Bands a starter pool is filled at after a level check: the measured band (A1 at least) and the next. */
+export function starterBands(vocab: number): number[] {
+  const from = Math.min(6, Math.max(1, Math.round(vocab)));
+  return from < 6 ? [from, from + 1] : [from];
+}

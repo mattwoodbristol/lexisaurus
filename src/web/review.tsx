@@ -4,8 +4,9 @@ import { SayIt } from './mic';
 import { spokenRating } from '../core/speech/compare';
 import { autoplayText } from '../core/review/autoplay';
 import { api, errorText, type ReviewItem } from './api';
+import type { StoryRecap } from '../core/review/story';
 import { Zh, PinyinToggle, usePinyinMode } from './ruby';
-import { BLANK } from '../core/review/exercise';
+import { BLANK, withFixedSentence } from '../core/review/exercise';
 import { sameText } from '../core/text/rules';
 import { LangContext, targetName, useStudyLang } from './lang';
 import { QuizRun } from './lesson-steps';
@@ -14,12 +15,15 @@ import { Lexi, useLexiStage } from './mascot/lexi';
 import type { Token } from '../core/pinyin/annotate';
 import { boardGloss } from '../core/assessment/sort-board';
 import { MatchBoardView, useMatchBoard, type MatchWord } from './match-board';
-import { useQueryContext } from './page-query';
+import { FIXED_EVENT, useQueryContext, type AppliedFix } from './page-query';
 
 type Rating = 1 | 2 | 3 | 4;
 /** Words on a review matching board at once (plus one decoy meaning). */
 const MATCH_BOARD = 5;
 type MatchCard = MatchWord & { item: ReviewItem };
+
+/** localStorage: show the English under review stories' lines. */
+const STORY_EN = 'review.story_english';
 
 const RATINGS: { r: Rating; label: string; cls: string }[] = [
   { r: 1, label: 'Pass', cls: 'again' },
@@ -52,14 +56,52 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
   const cheerTimer = useRef<number | undefined>(undefined);
   /** Title of a grammar point whose quiz just counted as passing its lesson check. */
   const [passed, setPassed] = useState<string | null>(null);
+  /** The story the current set tells, and the story on screen once its set is done. */
+  const batchStory = useRef<StoryRecap | null>(null);
+  const [recap, setRecap] = useState<StoryRecap | null>(null);
+  /** English under the story's lines: hidden until asked for (remembered on this device). */
+  const [storyEn, setStoryEn] = useState(() => {
+    try {
+      return localStorage.getItem(STORY_EN) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleStoryEn = () => {
+    const next = !storyEn;
+    setStoryEn(next);
+    try {
+      localStorage.setItem(STORY_EN, next ? '1' : '0');
+    } catch {
+      // private window: the choice lasts this visit
+    }
+  };
+  const enToggle = (
+    <button type="button" class={`secondary icon tiny ${storyEn ? 'on' : ''}`} onClick={toggleStoryEn} aria-pressed={storyEn} aria-label={storyEn ? 'Hide English' : 'Show English'} title="English">
+      EN
+    </button>
+  );
+
+  /** Cards in this sitting: the "to do" count on the home screen when it opened (null: no limit). */
+  const target = useRef<number | null>(null);
+  const [setDone, setSetDone] = useState(false);
+  const left = () => (target.current === null ? undefined : target.current - answered.current.length);
 
   async function fetchMore() {
+    const want = left();
+    if (want !== undefined && want <= 0) {
+      setQueue([]);
+      setSetDone(true);
+      setFinished(true);
+      return;
+    }
     setLoading(true);
     try {
-      const r = await api.reviewNext(lang, answered.current.slice(-60), pendingInclude.current);
+      const r = await api.reviewNext(lang, answered.current.slice(-60), pendingInclude.current, want);
       pendingInclude.current = undefined; // only the first batch forces the grammar point of the day
       setAnn((a) => ({ ...a, ...(r.annotations ?? {}) }));
       setNotice(r.notice);
+      batchStory.current = r.story ?? null;
       if (r.items.length === 0) setFinished(true);
       setQueue(r.items);
     } catch (e) {
@@ -70,15 +112,68 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
   }
   useEffect(() => {
     answered.current = [];
+    batchStory.current = null;
+    setRecap(null);
     setFinished(false);
-    fetchMore();
-  }, [lang]); // the study language may load after the first render
+    setSetDone(false);
+    // Today's set: as many cards as the home screen says are left (today's grammar point at least).
+    api
+      .reviewSummary(lang)
+      .then((s) => (target.current = Math.max(s.remaining_today, include ? 1 : 0)))
+      .catch(() => (target.current = null))
+      .finally(fetchMore);
+  }, [lang]);
+  function keepGoing() {
+    target.current = null;
+    setSetDone(false);
+    setFinished(false);
+    void fetchMore();
+  } // the study language may load after the first render
+
+  /** A set's cards are done: the whole story it told, if any, before the next set. */
+  function endSet() {
+    const story = batchStory.current;
+    batchStory.current = null;
+    if (!story) return fetchMore();
+    setQueue([]);
+    setRecap(story);
+  }
+  function afterRecap() {
+    setRecap(null);
+    void fetchMore();
+  }
 
   const item = queue[0];
   const ex = item?.exercise;
   // "Something looks wrong?" can fix what this card shows: the lesson a grammar quiz comes from,
   // the word's meaning, the example sentence.
   useQueryContext({ lessonId: ex?.kind === 'quiz' ? ex.lessonId : undefined, wordId: item?.itemType === 'word' ? item.itemId : undefined, sentenceId: ex?.sentenceId });
+
+  // A fix from "Something looks wrong?" shows in place, so the set and its story carry on.
+  useEffect(() => {
+    const onFix = (e: Event) => {
+      const { sentence: s, word: w } = (e as CustomEvent<AppliedFix>).detail ?? {};
+      if (!s && !w) return;
+      e.preventDefault();
+      setQueue((q) =>
+        q.map((it) => ({
+          ...it,
+          ...(w && it.word && it.itemType === 'word' && it.itemId === w.id ? { word: { ...it.word, gloss: w.gloss } } : {}),
+          exercise: s ? withFixedSentence(it.exercise, s) : it.exercise,
+        })),
+      );
+      if (!s) return;
+      const fixStory = (st: StoryRecap | null) => st && { ...st, sentences: st.sentences.map((x) => (x.id === s.id ? { ...x, zh: s.zh, en: s.en, target: s.target } : x)) };
+      batchStory.current = fixStory(batchStory.current);
+      setRecap(fixStory);
+      api
+        .annotateTexts(lang, [s.zh, s.zh.replace(s.target, BLANK)])
+        .then((r) => setAnn((a) => ({ ...a, ...r.annotations })))
+        .catch(() => {});
+    };
+    window.addEventListener(FIXED_EVENT, onFix);
+    return () => window.removeEventListener(FIXED_EVENT, onFix);
+  }, [lang]);
 
   /** Multiple choice marks itself: right is Good, wrong or "don't know" is Pass. */
   function choose(i: number) {
@@ -137,7 +232,7 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
       setChosen(null);
       setSpoken(null);
       const rest = queue.slice(1);
-      if (rest.length === 0) await fetchMore();
+      if (rest.length === 0 || left() === 0) await endSet();
       else setQueue(rest);
     } catch (e) {
       setErr(errorText(e));
@@ -198,21 +293,32 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
     if (!boardDone) return;
     const rest = queue.filter((q) => !onBoard.current.has(q.cardId));
     onBoard.current = new Set();
-    if (rest.length) setQueue(rest);
-    else void fetchMore();
+    if (rest.length && left() !== 0) setQueue(rest);
+    else void endSet();
   }, [boardDone]);
 
   // Before the answer shows, every word can be tapped except the one being tested.
   const hidden = [ex?.target, item?.word?.lemma].filter((x): x is string => !!x).map((x) => x.toLowerCase());
+  // Latin script compares whole words ("io" is not in "mio"; "accordo" is in "l'accordo");
+  // Chinese has no spaces, so it compares characters.
+  const latin = config.script === 'latin';
+  const words = (s: string) => s.split(/[\s'’]+/).filter(Boolean);
+  const sameWord = (w: string, h: string) => words(w).some((a) => words(h).includes(a));
   const tapBefore = (t: Token) => {
     const w = t.text.toLowerCase();
-    return !hidden.some((h) => h.includes(w) || w.includes(h));
+    return !hidden.some((h) => (latin ? sameWord(w, h) : h.includes(w) || w.includes(h)));
   };
   const z = (s: string, big = false) => <Zh text={s} ann={ann} mode={mode} big={big} tap={shown || tapBefore} />;
   /** The word being tested, picked out in its sentence. */
   const tested = (t: Token) => {
     const w = t.text.toLowerCase();
-    return hidden.some((h) => h === w || (w.length > 1 && h.includes(w)) || w.includes(h));
+    return hidden.some((h) => (latin ? sameWord(w, h) : h === w || (w.length > 1 && h.includes(w)) || w.includes(h)));
+  };
+  /** A story sentence's target word, picked out like the tested word on a card. */
+  const storyMark = (target: string) => (t: Token) => {
+    const w = t.text.toLowerCase();
+    const h = target.toLowerCase();
+    return latin ? sameWord(w, h) : h === w || (w.length > 1 && h.includes(w)) || w.includes(h);
   };
   const suggested: Rating | null = spoken ?? (verdict === null ? null : verdict ? 3 : 1);
 
@@ -223,7 +329,7 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
         <button class="secondary icon" onClick={onBack} aria-label="Back to home">
           ‹
         </button>
-        <strong class="grow">Review · {count} done</strong>
+        <strong class="grow">Review · {target.current ? `${Math.min(count, target.current)} of ${target.current}` : `${count} done`}</strong>
         {canSpeak && (
           <button class={`secondary icon autoplay ${autoplay ? 'on' : ''}`} onClick={toggleAutoplay} aria-label={autoplay ? 'Auto-play audio is on. Tap to turn off.' : 'Auto-play audio is off. Tap to turn on.'} title="Auto-play audio">
             {autoplay ? '🔊' : '🔇'}
@@ -245,7 +351,40 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
           <span class="muted">Preparing practice sentences…</span>
         </div>
       )}
-      {finished && !item && (
+      {recap && !item && (
+        <div class="card story-recap">
+          <div class="muted small">The whole story {enToggle}</div>
+          <div class="with-speak">
+            <strong>{recap.title}</strong> <SpeakButton text={recap.sentences.map((x) => x.zh).join(latin ? ' ' : '')} small />
+          </div>
+          <ol class="story-sentences">
+            {recap.sentences.map((x, i) => (
+              <li key={i}>
+                <div class="with-speak">
+                  <Zh text={x.zh} ann={ann} mode={mode} tap mark={x.target ? storyMark(x.target) : undefined} /> <SpeakButton text={x.zh} small />
+                </div>
+                {storyEn && <div class="muted small">{x.en}</div>}
+              </li>
+            ))}
+          </ol>
+          <button onClick={afterRecap}>Continue</button>
+        </div>
+      )}
+      {finished && !item && setDone && (
+        <div class="card">
+          <Lexi stage={stage} mood="happy" size={96} />
+          <br />
+          <strong>Today's reviews are done.</strong>
+          <p class="muted">{count ? `You reviewed ${count} card${count === 1 ? '' : 's'}.` : 'Nothing left in today\'s set.'}</p>
+          <div class="row">
+            <button onClick={onBack}>Home</button>
+            <button class="secondary" onClick={keepGoing}>
+              Keep going
+            </button>
+          </div>
+        </div>
+      )}
+      {finished && !item && !setDone && (
         <div class="card">
           <Lexi stage={stage} mood="happy" size={96} />
           <br />
@@ -261,6 +400,23 @@ export function Review({ onBack, include }: { onBack: () => void; include?: numb
             {item.itemType === 'grammar_point' ? 'Grammar' : 'Word'} ·{' '}
             {{ cloze: 'Fill in the blank', zh_to_en: 'What does this mean?', en_to_zh: `Say it in ${targetName(config)}`, flash: ex.choices ? 'What does this mean?' : 'Do you know this?', match: 'Match each word to its meaning', intro: item.word?.status === 'known' ? 'First review' : 'New word', quiz: item.grammar?.title ?? 'Quiz' }[ex.kind]}
           </div>
+          {ex.story && (
+            <div class="muted small story-line">
+              {ex.story.title} · {ex.story.part} of {ex.story.of}
+              {ex.story.prev && enToggle}
+              {/* The story so far: the lines since the last card, so the cards read as one story. */}
+              {ex.story.prev && (
+                <div class="story-prev">
+                  {ex.story.prev.map((l, i) => (
+                    <div key={i}>
+                      <Zh text={l.zh} ann={ann} mode={mode} tap />
+                      {storyEn && <span> {l.en}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {matching && (
             <>

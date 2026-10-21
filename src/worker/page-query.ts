@@ -11,21 +11,24 @@ import { applyFix, fromFlat, hasFix, type LessonFix } from '../core/lessons/fix'
 import { pageQueryPrompt } from '../../prompts';
 import { stripPinyin } from '../core/pinyin/strip';
 import { invalidateDict } from './words';
+import { keptStory } from './review';
 
 export const pageQueryRoutes = new Hono<{ Bindings: Env }>();
 
 const Pair = z.object({ zh: z.string(), en: z.string() });
 const Choice = z.object({ prompt: z.string(), options: z.array(z.string()), answer: z.number().int() });
+// The API allows at most 16 nullable fields in a schema, so a check item's unused text fields are
+// empty strings rather than null.
 const CheckItem = z.object({
   kind: z.enum(['choice', 'translate', 'fix']),
-  prompt: z.string().nullable(),
+  prompt: z.string(),
   options: z.array(z.string()).nullable(),
   answer: z.number().int().nullable(),
-  en: z.string().nullable(),
-  zh: z.string().nullable(),
-  wrong: z.string().nullable(),
-  right: z.string().nullable(),
-  note: z.string().nullable(),
+  en: z.string(),
+  zh: z.string(),
+  wrong: z.string(),
+  right: z.string(),
+  note: z.string(),
 });
 const Fix = z.object({
   explanation: z.array(z.string()).nullable(),
@@ -100,12 +103,18 @@ pageQueryRoutes.post('/', async (c) => {
   const lang = lesson?.lang ?? word?.lang ?? sentence?.lang ?? (getLanguage(str(b.lang, 10)) ? str(b.lang, 10) : 'zh');
   const language = getLanguage(lang) ?? getLanguage('zh')!;
   const content = lesson ? (JSON.parse(lesson.content_json) as LessonContent) : null;
+  // A sentence in today's review story: a corrected one must still fit the story.
+  const story = sentence ? await keptStory(c.env.DB, lang) : null;
+  const inStory = story?.sentences.findIndex((x) => x.id === sentence!.id) ?? -1;
   const question = [
     `Screen: ${str(b.screen, 40) || 'unknown'}`,
     `On screen:\n${text || '(nothing captured)'}`,
     content ? `Lesson content:\n${JSON.stringify(content)}` : '',
     word ? `Word on this card: ${word.lemma}, meaning in the learner's word list: ${word.gloss ?? '(none)'}` : '',
     sentence ? `Example sentence on this card: ${JSON.stringify({ zh: sentence.zh, en: sentence.en, target: sentence.target ?? word?.lemma ?? '' })}` : '',
+    inStory >= 0
+      ? `The sentence is part ${inStory + 1} of a short story told one sentence per card ("${story!.title}"), so a corrected sentence must keep following on from the one before and lead into the one after:\n${story!.lines.map((x) => `${x.id === sentence!.id ? '→ ' : ''}${x.zh} (${x.en})${x.id === undefined ? ' [linking line, tests nothing]' : ''}`).join('\n')}`
+      : '',
     `What the learner thinks is wrong: ${note}`,
   ]
     .filter(Boolean)

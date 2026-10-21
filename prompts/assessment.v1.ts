@@ -14,6 +14,13 @@ export function assessWordsPrompt(language: string, lang: string): string {
 2. fillers: for each band asked for, the number of common, unambiguous ${language} words typical of that band, each with a short English gloss (at most 6 words). For bands 5-6, choose words an educated native speaker uses (literary, formal or idiomatic), never technical, scientific or specialist terms. Avoid the excluded words.${lang === 'zh' ? ' Simplified characters only, no pinyin.' : ' Dictionary form.'}`;
 }
 
+/** A starter pool for a language with few words at the learner's level, after the level check. */
+export function starterWordsPrompt(language: string, lang: string): string {
+  return `You choose the next words to learn for a learner of ${language} (${bandScale(lang)}). Their vocabulary has just been measured; their word list has few words at their level, so these words fill it.
+
+For each band asked for, give the number of words asked for: the most frequent, useful everyday ${language} words typical of that band, the ones a course at that level teaches, each with a short English gloss (at most 6 words). Prefer words that work in everyday conversation and stories; never technical, specialist, rare or literary words, and no proper names. Avoid the excluded words.${lang === 'zh' ? ' Simplified characters only, no pinyin.' : ' Dictionary form.'}`;
+}
+
 export function grammarBankPrompt(language: string, lang: string): string {
   return `You write the grammar part of an adaptive level check for an adult English-speaking learner of ${language} (${bandScale(lang)}).
 

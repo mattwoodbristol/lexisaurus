@@ -290,6 +290,8 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
       .status(lang)
       .then((r) => setLevel({ taken: !!r.check, unsorted: r.unsorted, pile: r.pile }))
       .catch(() => {});
+    // The next review's story is written in the background, so the review opens straight away.
+    api.prepareReview(lang).catch(() => {});
     api
       .session(lang)
       .then((s) => {
@@ -372,8 +374,9 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
       {enabled.length > 1 && (
         <div class="lang-switch" role="tablist" aria-label="Language">
           {enabled.map((l) => (
-            <button key={l.id} role="tab" aria-selected={l.id === lang} class={`lang-pill ${l.id === lang ? 'on' : ''}`} onClick={() => setLang(l.id)}>
-              {l.nativeName}
+            <button key={l.id} role="tab" aria-selected={l.id === lang} aria-label={l.nativeName} class={`lang-pill ${l.id === lang ? 'on' : ''}`} onClick={() => setLang(l.id)}>
+              {/* 中文 is already short; Latin-script languages show their code (IT, ES, FR). */}
+              {l.script === 'han' ? l.nativeName : l.id.toUpperCase()}
             </button>
           ))}
         </div>
@@ -395,7 +398,7 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
           <button onClick={() => go({ name: 'level-check' })}>Start</button>
         </div>
       )}
-      {level && level.taken && level.pile && level.unsorted >= 50 && (
+      {level && level.taken && level.pile && level.unsorted >= 20 && (
         <div class="card row">
           <div class="grow small">
             <strong>

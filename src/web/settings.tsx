@@ -28,6 +28,7 @@ interface Form {
   nativeLang: string;
   speechRate: number;
   autoplay: boolean;
+  story: boolean;
   budget: number;
   graduateDays: number;
   chatTurns: number;
@@ -273,6 +274,7 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
           nativeLang: typeof s['native_lang'] === 'string' ? (s['native_lang'] as string) : 'en',
           speechRate: Number(s['speech.rate'] ?? DEFAULT_RATE) || DEFAULT_RATE,
           autoplay: s['review.autoplay'] !== false,
+          story: s['review.story'] !== false,
           budget: Number(s['daily_token_budget'] ?? 200000),
           graduateDays: Number(s['srs.graduate_days'] ?? 21),
           chatTurns: Number(s['session.min_chat_turns'] ?? 3),
@@ -307,6 +309,7 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
         api.putSetting('native_lang', f.nativeLang),
         api.putSetting('speech.rate', f.speechRate),
         api.putSetting('review.autoplay', f.autoplay),
+        api.putSetting('review.story', f.story),
         api.putSetting('daily_token_budget', Math.max(1000, Math.round(f.budget))),
         api.putSetting('srs.graduate_days', Math.max(1, Math.round(f.graduateDays))),
         api.putSetting('session.min_chat_turns', Math.max(1, Math.round(f.chatTurns))),
@@ -448,6 +451,9 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
         </label>
         <label class="check">
           <input type="checkbox" checked={form.autoplay} onChange={(e) => set({ autoplay: (e.target as HTMLInputElement).checked })} /> Auto-play: say answers as they are revealed, in reviews and lessons
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={form.story} onChange={(e) => set({ story: (e.target as HTMLInputElement).checked })} /> Story reviews: each set's example sentences tell one short story, in order (new sentences every set, so more Claude use)
         </label>
         <label>
           <div class="label">Reviews per day (all cards, new words included)</div>

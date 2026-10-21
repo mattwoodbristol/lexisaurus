@@ -1,17 +1,17 @@
 // Proofreading generated material before a learner sees it: a second, careful pass by a stronger
 // model, which corrects what the writer got wrong and changes nothing else.
 
-/** Example sentences for vocabulary reviews (one per target word). */
-export const proofreadSentencesPrompt = (langName: string, latin: boolean) => `You proofread example sentences written for a ${langName} learner's vocabulary reviews, before the learner sees them. In each item, "word" is the target word, "zh" the ${langName} sentence (whatever the language) and "en" its English translation${latin ? ', and "form" the target word exactly as it appears in the sentence' : ''}.
+/** Example sentences for vocabulary reviews (one per target word); `story` (title and premise) when they tell one story, in order. */
+export const proofreadSentencesPrompt = (langName: string, latin: boolean, story?: string) => `You proofread example sentences written for a ${langName} learner's vocabulary reviews, before the learner sees them. In each item, "word" is the target word, "zh" the ${langName} sentence (whatever the language) and "en" its English translation${latin ? ', and "form" the target word exactly as it appears in the sentence' : ''}.
 
 Check each item and correct it where needed:
 - The ${langName} must be natural and grammatically correct, as a native speaker would say it.
 - The English must be an accurate, natural translation of it.
 - The target word must appear exactly as given${latin ? ' ("form" must match the sentence exactly)' : ''}, used in its common meaning, and the sentence must make that meaning clear.
-- The target must be the ONLY word the learner might not know. Apart from it, the sentence may use only words from the list of words the learner knows (and the most basic words: pronouns, numbers, very common particles). Rewrite the sentence with known words if it uses any other word, including any listed as a problem.
+- The target must be the ONLY word the learner might not know. Apart from it, the sentence may use only words from the list of words the learner knows (and the most basic words: pronouns, numbers, very common particles), plus at most one word from a list of words they will learn soon, when the request gives one, and the characters' names, when it lists them. Rewrite the sentence with known words if it uses any other word, including any listed as a problem.
 - 6 to 16 ${latin ? 'words' : 'characters'}.${latin ? '' : ' Hanzi only: never pinyin or tone numbers.'}
-
-Return every item, corrected or unchanged, with "word" copied exactly. Change only what is wrong.`;
+${story ? `\nThe items are the consecutive lines of one short story, in this order (${story}). Read them in order first: they must make sense together, each following on from the one before. A correction must keep its line in the story. An item whose "word" starts with "~" is a linking line: it tests no word, so it has no target (leave "word"${latin ? ' and "form"' : ''} as given), and it may use only words the learner knows, earlier target words and names. A target word may also come back in lines after its own.\n` : ''}
+Return every item, corrected or unchanged, with "word" copied exactly${story ? ', in the same order' : ''}. Change only what is wrong.`;
 
 /** A whole generated lesson, practice sets included. */
 export const proofreadLessonPrompt = (langName: string) => `You proofread a ${langName} lesson written for one learner, before they see it. It is JSON. Fields named "zh" hold ${langName} (whatever the language) and "en" English; "wrong" holds a deliberately wrong ${langName} sentence and "right" its correction.

@@ -6,8 +6,7 @@ import type { DbLesson, DbTopic } from './sync-plan';
 import type { LessonContent } from '../lessons/types';
 import type { FileMap } from './zip';
 import { getLanguage } from '../languages';
-import { ZH_CURRICULUM } from '../languages/zh.curriculum';
-import { ZH_TOPICS } from '../languages/zh.topics';
+import { CURRICULA, TOPIC_SEEDS } from '../languages/seeds';
 
 /** Help files the app adds to a download; ignored on upload. */
 export const GUIDE_FILES = ['HOW-TO-EDIT.md', 'FORMAT.md'];
@@ -41,14 +40,10 @@ export function courseFromDb(lang: string, rows: DbLesson[], plan: PlannedLesson
   const titles = new Set(lessons.map((l) => l.title.toLowerCase()));
   const planned: PlannedLesson[] = plan.length
     ? plan.filter((p) => !written.has(p.id))
-    : lang === 'zh'
-      ? ZH_CURRICULUM.filter((c) => !titles.has(c.title.toLowerCase())).map((c) => ({ id: uniqueId(slugify(c.title, 'planned')), ...c }))
-      : [];
+    : (CURRICULA[lang] ?? []).filter((c) => !titles.has(c.title.toLowerCase())).map((c) => ({ id: uniqueId(slugify(c.title, 'planned')), ...c }));
   const topics: PackTopic[] = topicRows.length
     ? topicRows.map((t) => ({ name: t.name, tags: t.tags ? t.tags.split(',') : [], scenario: t.scenario_seed ?? '' }))
-    : lang === 'zh'
-      ? ZH_TOPICS
-      : [];
+    : (TOPIC_SEEDS[lang] ?? []);
   return { manifest: { lang, title: title ?? getLanguage(lang)?.name ?? lang, lessons: lessons.map((l) => l.id), planned }, lessons, topics };
 }
 

@@ -1,11 +1,13 @@
 import type { LanguageConfig, LanguageId } from './types';
 import { zh } from './zh';
 import { it } from './it';
+import { es } from './es';
+import { fr } from './fr';
 
 export type { LanguageConfig, LanguageId } from './types';
 
-// Adding a language = add a config file here + seed topics. Nothing else.
-export const LANGUAGES: Partial<Record<LanguageId, LanguageConfig>> = { zh, it };
+// Adding a language = add a config file here + seed topics (seeds.ts) + a prompt set. Nothing else.
+export const LANGUAGES: Partial<Record<LanguageId, LanguageConfig>> = { zh, it, es, fr };
 
 /** Languages switched on by default (setting languages.enabled overrides). */
 export const DEFAULT_ENABLED: LanguageId[] = ['zh'];

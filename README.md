@@ -3,7 +3,7 @@
 A personal, single-user language tutor you run yourself: daily reviews with spaced repetition,
 grammar lessons, and chat practice with a tutor that corrects you as much as you want. It runs on
 your own Cloudflare account (free plan) and your own Claude API key, so your data stays yours.
-Mandarin and Italian are built in; other languages need a config and a prompt set. See `SPEC.md`
+Mandarin, Italian, Spanish and French are built in; other languages need a config and a prompt set. See `SPEC.md`
 for the full design.
 
 - no ads
@@ -122,13 +122,13 @@ npm run seed:local        # applies pleco, sheet and lessons seeds
 node scripts/smoke-phase2.mjs [--generate]   # end-to-end, real API (--generate also writes one lesson, ~2p)
 ```
 
-- **Topics**: ~40 seed topics per language in `src/core/languages/<id>.topics.ts`, inserted when a
+- **Topics**: ~40 seed topics per language in `src/core/languages/<id>.topics.ts` (registered in `seeds.ts`), inserted when a
   language has none. After that a course pack's `topics.json` owns them. `src/core/topics/select.ts` picks least-recently-used (age squared), averages a tag penalty
   over the last 5 sessions, adds ±20% jitter, and never repeats within the last 8 sessions. The
   tutor is told the topic and not to steer away from it; it opens the conversation itself.
 - **Lessons**: one format for imported and generated lessons (`src/core/lessons/types.ts`). The 20
   taught lessons are imported from the notes; "Generate" writes the next planned lesson (the
-  course pack's plan, or `<id>.curriculum.ts` before a pack is synced) with Sonnet using structured output, validation and one retry. Marking a
+  course pack's plan, or `<id>.curriculum.ts` before a pack is synced: Mandarin, and A1-B2 for Spanish and French) with Sonnet using structured output, validation and one retry. Marking a
   lesson done puts its grammar points into SRS and starts tracking its words. Search uses an FTS5
   trigram index (3+ characters) with a LIKE fallback for 1-2 character Chinese queries.
 - **Reviews**: FSRS via ts-fsrs. Exercises rotate cloze / Chinese-to-English / English-to-Chinese
@@ -231,7 +231,7 @@ node scripts/make-public-copy.mjs ../lexisaurus-public --repo <owner>/<repo>
 
 The first time, the target is an empty folder; after that, your clone of the public repository
 (its history and LICENSE are kept). Database migrations run on every copy as it updates, so they
-must work on data already there. The update script keeps each copy's Worker name and database
+must work on data already there; a migration that changes only your own data goes in the script's `PERSONAL_MIGRATIONS` and ships as a no-op. The update script keeps each copy's Worker name and database
 id from its own `wrangler.jsonc` and its own workflow files; everything else is replaced. In this
 repository `release.json` has no upstream, so the update workflow does nothing here. The home
 screen says when a copy has fallen behind (`/api/updates`).
@@ -263,7 +263,9 @@ data); put Cloudflare Access in front if you also want the shell gated.
    one (Italian). Register it in `src/core/languages/index.ts`.
 2. Add its prompt set (`prompts/<id>.v1.ts`, registered in `prompts/languages.ts`): tutor,
    lesson, practice, exercises, grade, query and gloss.
-3. Give it a course pack (`course.json` with its `lang`) and topics, then switch it on in
+3. Add a migration inserting its `languages` row. Give it seed topics (`<id>.topics.ts`) and
+   optionally a built-in curriculum (`<id>.curriculum.ts`), registered in
+   `src/core/languages/seeds.ts`, or a course pack (`course.json` with its `lang`). Then switch it on in
    Settings → Languages. Switched-off languages get no reminders.
 
 Latin-script words are resolved to their dictionary form on first tap (parlava → parlare) with

@@ -129,6 +129,8 @@ button.chip.tap { min-height: 0; padding: 2px 10px; color: var(--fg); font-size:
 /* New-word introduction in review */
 .intro { display: grid; gap: 8px; }
 .intro-example { border-top: 1px solid rgba(127,127,127,0.2); padding-top: 8px; }
+.story-sentences { display: grid; gap: 10px; margin: 0; padding-left: 1.4em; }
+.story-prev { margin-top: 4px; padding-left: 8px; border-left: 2px solid rgba(127,127,127,0.3); }
 
 /* Lexisaurus mascot (tokens from the asset pack) */
 :root { --lexi-label: #9a5418; --lexi-track: #e3e9f0; --lexi-fill: #b5651d; --lexi-tile: #f6ecdf; --lexi-line: #dfe5ec; }
@@ -217,8 +219,11 @@ button.chip.tap { min-height: 0; padding: 2px 10px; color: var(--fg); font-size:
 .sheet-word.latin { font-size: 1.6rem; }
 
 /* Language switcher on the home screen */
-.lang-switch { display: flex; gap: 6px; margin: 2px 0 8px; }
-.lang-pill { min-height: 36px; padding: 6px 14px; border-radius: 999px; background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+/* Pills never shrink or wrap (中文 broke onto two lines with four languages); they share spare
+   width, and an unusually long row scrolls sideways instead of squeezing them. */
+.lang-switch { display: flex; gap: 6px; margin: 2px 0 8px; overflow-x: auto; scrollbar-width: none; }
+.lang-switch::-webkit-scrollbar { display: none; }
+.lang-pill { flex: 1 0 auto; min-height: 36px; padding: 6px 10px; font-size: 0.95rem; white-space: nowrap; border-radius: 999px; background: transparent; color: var(--accent); border: 1px solid var(--accent); }
 .lang-pill.on { background: var(--accent); color: var(--on-accent); }
 
 /* Level check and word sorting */

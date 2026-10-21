@@ -1,12 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { getLanguage } from '../core/languages';
-import { ZH_TOPICS, type TopicSeed } from '../core/languages/zh.topics';
+import { TOPIC_SEEDS } from '../core/languages/seeds';
 import { pickTopic, seededRng, type TopicCandidate } from '../core/topics/select';
 import { localToday } from './day';
-
-// Seed data per language. Adding a language = add its topics here (and its config).
-export const TOPIC_SEEDS: Record<string, TopicSeed[]> = { zh: ZH_TOPICS };
 
 const seeded = new Set<string>();
 

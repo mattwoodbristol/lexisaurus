@@ -8,6 +8,7 @@ import type { LessonFix } from '../core/lessons/fix';
 import type { StepKey, WarmupItem } from '../core/lessons/steps';
 import type { Mastery } from '../core/lessons/mastery';
 import type { Exercise } from '../core/review/exercise';
+import type { StoryRecap } from '../core/review/story';
 import type { ListeningContent, ListeningKind } from '../core/listening/types';
 
 export class ApiError extends Error {
@@ -325,11 +326,12 @@ export const api = {
   submitCheck: (id: number, results: { kind: string; right: boolean; answer: string }[]) => request<CheckSubmitResult>(`/api/lessons/${id}/check`, post({ results })),
   generateLesson: (lang: string, title?: string) => request<{ id: number; title: string }>('/api/lessons/generate', post({ lang, ...(title ? { title } : {}) })),
 
+  prepareReview: (lang: string) => request<{ status: string }>(`/api/review/prepare?lang=${lang}`, post()),
   reviewSummary: (lang: string) => request<ReviewSummary>(`/api/review/summary?lang=${lang}`),
   knownCount: (lang: string) => request<{ known: number }>(`/api/review/known?lang=${lang}`),
-  reviewNext: (lang: string, skip: number[] = [], include?: number) =>
-    request<{ items: ReviewItem[]; annotations?: Record<string, Token[]>; notice: string | null; limitReached?: boolean }>(
-      `/api/review/next?lang=${lang}&skip=${skip.join(',')}${include ? `&include=${include}` : ''}`,
+  reviewNext: (lang: string, skip: number[] = [], include?: number, limit?: number) =>
+    request<{ items: ReviewItem[]; annotations?: Record<string, Token[]>; notice: string | null; limitReached?: boolean; story?: StoryRecap | null }>(
+      `/api/review/next?lang=${lang}&skip=${skip.join(',')}${include ? `&include=${include}` : ''}${limit ? `&limit=${limit}` : ''}`,
     ),
   answer: (cardId: number, rating: 1 | 2 | 3 | 4, kind?: string, exerciseId?: number, quiz?: { score: number; total: number }) =>
     request<{ due: string; status: string | null; statusChanged: boolean; lessonPassed?: boolean }>(`/api/review/${cardId}`, post({ rating, kind, exerciseId, quiz })),

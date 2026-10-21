@@ -10,7 +10,8 @@ import { annotate } from '../core/pinyin/annotate';
 import { isSectioned, renderLessonMd, validateLesson, lessonStrings, type LessonContent } from '../core/lessons/types';
 import { fixAnswerKey, type WrongKey } from '../core/lessons/fix';
 import { stripPinyin } from '../core/pinyin/strip';
-import { ZH_CURRICULUM, type CurriculumItem } from '../core/languages/zh.curriculum';
+import type { CurriculumItem } from '../core/languages/zh.curriculum';
+import { CURRICULA } from '../core/languages/seeds';
 import { promptsFor, hasPrompts, proofreadLessonPrompt } from '../../prompts';
 import { getLanguage, type LanguageConfig } from '../core/languages';
 import { sameText, rulesFor } from '../core/text/rules';
@@ -24,8 +25,6 @@ import { lessonTextsIn, originalExplainLang } from './lesson-texts';
 import { DEFAULT_PASS_MARK, STEP_LABEL, nextStep, pickWarmup, scoreCheck, type NextLesson, type StepKey, type WarmupSource } from '../core/lessons/steps';
 
 export const lessonRoutes = new Hono<{ Bindings: Env }>();
-
-const CURRICULA: Record<string, CurriculumItem[]> = { zh: ZH_CURRICULUM };
 
 export interface LessonRow {
   id: number;
@@ -227,7 +226,14 @@ lessonRoutes.post('/:id{[0-9]+}/done', async (c) => {
   const id = Number(c.req.param('id'));
   const row = await c.env.DB.prepare('SELECT * FROM lessons WHERE id = ?1').bind(id).first<LessonRow>();
   if (!row) return c.json({ error: 'not found' }, 404);
-  return c.json(await markDone(c.env, row));
+  const res = await markDone(c.env, row);
+  // Marked done by the learner: today's lesson step (done by a review quiz or the level check is not).
+  await c.env.DB.prepare(
+    `INSERT INTO lesson_progress(lesson_id) VALUES (?1) ON CONFLICT(lesson_id) DO UPDATE SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+  )
+    .bind(id)
+    .run();
+  return c.json(res);
 });
 
 export async function markDone(env: Env, row: LessonRow) {
@@ -294,14 +300,17 @@ export async function enterLearntGrammar(db: D1Database, lang: string): Promise<
   return r.meta.changes ?? 0;
 }
 
-/** Record a finished step; returns the steps now done. */
-export async function saveStep(db: D1Database, id: number, step: StepKey): Promise<StepKey[]> {
+/**
+ * Record a finished step; returns the steps now done. `today` false (a review quiz passing the
+ * check) leaves the time alone, so it does not count as today's lesson step.
+ */
+export async function saveStep(db: D1Database, id: number, step: StepKey, today = true): Promise<StepKey[]> {
   const cur = await lessonState(db, id);
   const steps = [...new Set([...cur.stepsDone, step])];
   await db
     .prepare(
-      `INSERT INTO lesson_progress(lesson_id, steps_json) VALUES (?1, ?2)
-       ON CONFLICT(lesson_id) DO UPDATE SET steps_json = excluded.steps_json, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+      `INSERT INTO lesson_progress(lesson_id, steps_json${today ? '' : ', updated_at'}) VALUES (?1, ?2${today ? '' : ", '1970-01-01T00:00:00.000Z'"})
+       ON CONFLICT(lesson_id) DO UPDATE SET steps_json = excluded.steps_json${today ? ", updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')" : ''}`,
     )
     .bind(id, JSON.stringify(steps))
     .run();
@@ -325,7 +334,7 @@ export async function passFromQuiz(env: Env, grammarPointId: number, score: numb
   const checkDone = !isSectioned(content) || stepsDone.includes('check');
   if (row.completed_at && checkDone) return false;
   if (!row.completed_at) await markDone(env, row);
-  if (!checkDone) await saveStep(env.DB, row.id, 'check');
+  if (!checkDone) await saveStep(env.DB, row.id, 'check', false);
   return true;
 }
 

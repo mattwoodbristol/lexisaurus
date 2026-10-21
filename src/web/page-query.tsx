@@ -19,6 +19,13 @@ function screenText(): string {
  * What the current screen shows, beyond its route: the lesson a review's grammar quiz comes from,
  * the word and example sentence on a review card. Queries carry it, so a fix can be applied.
  */
+/**
+ * Sent on window when a fix is applied, with the fix. A screen that shows it in place (a review
+ * card) cancels the event; otherwise the panel offers a reload.
+ */
+export const FIXED_EVENT = 'lexi:fixed';
+export type AppliedFix = NonNullable<PageQueryResult['fix']>;
+
 export interface QueryContext {
   lessonId?: number;
   wordId?: number;
@@ -42,7 +49,8 @@ export function PageQuery({ screen, lessonId: routeLesson }: { screen: string; l
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<PageQueryResult | null>(null);
-  const [applied, setApplied] = useState(false);
+  /** 'here': the screen shows the fix already; 'reload': reopen the page to see it. */
+  const [applied, setApplied] = useState<false | 'here' | 'reload'>(false);
   const [err, setErr] = useState('');
   const [text, setText] = useState('');
   const [ctx, setCtx] = useState<QueryContext>({ lessonId: routeLesson });
@@ -70,7 +78,8 @@ export function PageQuery({ screen, lessonId: routeLesson }: { screen: string; l
     setErr('');
     try {
       await api.applyPageFix(res.id);
-      setApplied(true);
+      const here = !!res.fix && !window.dispatchEvent(new CustomEvent(FIXED_EVENT, { detail: res.fix, cancelable: true }));
+      setApplied(here ? 'here' : 'reload');
     } catch (e) {
       setErr(errorText(e));
     } finally {
@@ -146,14 +155,14 @@ export function PageQuery({ screen, lessonId: routeLesson }: { screen: string; l
               )}
             </div>
           )}
-          {applied && <div class="right small">Fixed. Reopen the page to see the change.</div>}
+          {applied && <div class="right small">{applied === 'here' ? 'Fixed.' : 'Fixed. Reopen the page to see the change.'}</div>}
           <div class="row">
             {f && !applied && (
               <button disabled={busy} onClick={apply}>
                 {busy ? 'Saving…' : f?.word || f?.sentence ? 'Fix it' : 'Fix the lesson'}
               </button>
             )}
-            {applied ? (
+            {applied === 'reload' ? (
               <button onClick={() => location.reload()}>Reload</button>
             ) : (
               <button class="secondary" onClick={close}>

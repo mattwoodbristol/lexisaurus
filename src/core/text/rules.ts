@@ -7,8 +7,11 @@ import type { Script } from '../languages/types';
 const HAN = /[㐀-䶿一-鿿]/;
 const HAN_ONLY = /^[㐀-䶿一-鿿]+$/;
 const LETTER = /\p{L}/u;
-/** A Latin-script word, with an elided article or preposition kept as its own word: l' + acqua. */
-const LATIN_WORD = /[\p{L}\p{M}]+(?:['’](?=[\p{L}\p{M}]))?|[\p{L}\p{M}]+/gu;
+/**
+ * A Latin-script word, with an elided article or preposition kept as its own word: l' + acqua.
+ * French aujourd'hui is one word, not an elision.
+ */
+const LATIN_WORD = /aujourd['’]hui|[\p{L}\p{M}]+(?:['’](?=[\p{L}\p{M}]))?|[\p{L}\p{M}]+/giu;
 
 export interface TextRules {
   script: Script;

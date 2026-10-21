@@ -5,11 +5,11 @@ import { settingsRoutes } from './settings';
 import { chatRoutes } from './chat';
 import { topicRoutes } from './topics';
 import { lessonRoutes } from './lessons';
-import { reviewRoutes } from './review';
+import { prepareStory, reviewRoutes } from './review';
 import { sessionRoutes } from './session';
 import { pushRoutes } from './push';
 import { lookupRoutes } from './lookup';
-import { assessmentRoutes } from './assessment';
+import { assessmentRoutes, topUpStarterPool } from './assessment';
 import { textRoutes } from './texts';
 import { courseRoutes } from './course';
 import { listeningRoutes } from './listening';
@@ -74,6 +74,18 @@ export default {
       runReminders(env, new Date(event.scheduledTime))
         .then((log) => console.log(`[cron ${event.cron}]`, log.join(' | ') || 'nothing due'))
         .catch((e) => console.error('[cron] reminders failed', e)),
+    );
+    // The pool kept stocked at the learner's level, and the next review set's story written ahead
+    // so the review opens without waiting for it.
+    ctx.waitUntil(
+      (async () => {
+        for (const lang of await enabledLanguages(env.DB)) {
+          // Words at the learner's level first, so the story below can use them.
+          await topUpStarterPool(env, lang).catch((e) => console.error(`[cron] ${lang} starter pool failed`, e));
+          const status = await prepareStory(env, lang).catch((e) => `failed: ${e}`);
+          if (status === 'story written' || status.startsWith('failed')) console.log(`[cron ${event.cron}] ${lang} review story: ${status}`);
+        }
+      })(),
     );
     // Housekeeping: band unbanded words, a batch at a time.
     ctx.waitUntil(

@@ -33,6 +33,10 @@ describe('Latin-script rules (Italian)', () => {
     expect(toks.find((t) => t.text === 'parlare')).toMatchObject({ status: 'learning' });
     expect(toks.find((t) => t.text === 'fredda')!.status).toBe('unknown');
   });
+  it("keeps French elisions apart but aujourd'hui whole", () => {
+    const toks = r.tokenize("J'ai faim aujourd’hui, qu'est-ce qu'on mange ?", dict);
+    expect(toks.filter((t) => t.status).map((t) => t.text)).toEqual(["J'", 'ai', 'faim', 'aujourd’hui', "qu'", 'est', 'ce', "qu'", 'on', 'mange']);
+  });
   it('matches the word list case-insensitively and without the elision mark', () => {
     expect(r.key('Acqua')).toBe('acqua');
     expect(r.key("dell'")).toBe('dell');

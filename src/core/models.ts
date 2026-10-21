@@ -8,6 +8,8 @@ export const MODELS = {
   lessons: { id: 'claude-sonnet-5-5', inputPerM: 2.0, outputPerM: 10.0 },
   // Listening passages: keeping a text inside the learner's level needs the stronger model; one call per passage.
   listening: { id: 'claude-sonnet-5-5', inputPerM: 2.0, outputPerM: 10.0 },
+  // Review stories: one sentence per unrelated word that still reads as one story needs the stronger model; one call per set.
+  stories: { id: 'claude-sonnet-5-5', inputPerM: 2.0, outputPerM: 10.0 },
   // Checking the learner's chat messages for mistakes: accuracy matters (they feed the mistakes list).
   checking: { id: 'claude-sonnet-5-5', inputPerM: 2.0, outputPerM: 10.0 },
 } as const;

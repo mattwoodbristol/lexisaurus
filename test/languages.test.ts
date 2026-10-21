@@ -23,3 +23,19 @@ describe('language config', () => {
     expect(getLanguage('xx')).toBeUndefined();
   });
 });
+
+describe('Spanish and French', () => {
+  it('ship as Latin-script languages with prompts, topics and a curriculum', async () => {
+    const { hasPrompts } = await import('../prompts');
+    const { TOPIC_SEEDS, CURRICULA } = await import('../src/core/languages/seeds');
+    for (const id of ['es', 'fr']) {
+      const l = getLanguage(id);
+      expect(l?.script).toBe('latin');
+      expect(validateLanguageConfig(l!)).toEqual([]);
+      expect(hasPrompts(id)).toBe(true);
+      expect(TOPIC_SEEDS[id]!.length).toBeGreaterThanOrEqual(30);
+      expect(new Set(TOPIC_SEEDS[id]!.map((t) => t.name)).size).toBe(TOPIC_SEEDS[id]!.length);
+      expect(CURRICULA[id]!.length).toBeGreaterThanOrEqual(20);
+    }
+  });
+});
