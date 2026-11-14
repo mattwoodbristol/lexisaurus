@@ -284,7 +284,8 @@ async function lessonState(db: D1Database, id: number) {
 
 /**
  * Grammar enters the reviews once its lesson's Learn step is done (not only at the lesson check),
- * due the next day. Idempotent: covers every such lesson in the language that has no card yet.
+ * or the lesson is completed (marked done, or passed at the level check), due the next day.
+ * Idempotent: covers every such lesson in the language that has no card yet.
  */
 export async function enterLearntGrammar(db: D1Database, lang: string): Promise<number> {
   const tomorrow = new Date(Date.now() + 86_400_000);
@@ -292,8 +293,8 @@ export async function enterLearntGrammar(db: D1Database, lang: string): Promise<
     .prepare(
       `INSERT OR IGNORE INTO srs_cards(item_type, item_id, lang, fsrs_state_json, due_at)
        SELECT 'grammar_point', g.id, l.lang, ?2, ?3 FROM grammar_points g
-       JOIN lessons l ON l.id = g.lesson_id JOIN lesson_progress p ON p.lesson_id = l.id
-       WHERE l.lang = ?1 AND EXISTS (SELECT 1 FROM json_each(p.steps_json) WHERE value = 'learn')`,
+       JOIN lessons l ON l.id = g.lesson_id LEFT JOIN lesson_progress p ON p.lesson_id = l.id
+       WHERE l.lang = ?1 AND (l.completed_at IS NOT NULL OR EXISTS (SELECT 1 FROM json_each(p.steps_json) WHERE value = 'learn'))`,
     )
     .bind(lang, JSON.stringify(createEmptyCard(tomorrow)), tomorrow.toISOString())
     .run();
@@ -382,7 +383,7 @@ lessonRoutes.post('/grade', async (c) => {
   // Pinyin clean-up is for Chinese only (it would eat accented letters such as è).
   const answer = (language.hasRomanisation ? stripPinyin(raw) : raw).slice(0, 200);
   const expected = typeof body.expected === 'string' ? body.expected : '';
-  if (!answer || !expected || (body.kind !== 'translate' && body.kind !== 'fix' && body.kind !== 'cloze')) return c.json({ error: 'answer, expected and kind required' }, 400);
+  if (!answer || !expected || (body.kind !== 'translate' && body.kind !== 'fix' && body.kind !== 'cloze' && body.kind !== 'say')) return c.json({ error: 'answer, expected and kind required' }, 400);
   if (sameText(language.script, answer, expected)) return c.json({ correct: true, feedback: 'Exactly right.', corrected: expected, judged: false });
   const pattern = lesson ? (JSON.parse(lesson.content_json) as LessonContent).pattern : '';
   const target = language.id === 'zh' ? 'Chinese' : language.name;
@@ -392,7 +393,10 @@ lessonRoutes.post('/grade', async (c) => {
       : body.kind === 'cloze'
         ? // A review's fill-in-the-blank: judge the word or phrase in the blank, in this sentence.
           `Fill in the blank (＿＿) with the right word or phrase. Mark only what goes in the blank: another word or form that is correct and natural here, with the same meaning, counts as right. ${body.task ?? ''}`
-        : `Translate into ${target}: ${body.task ?? ''}`;
+        : body.kind === 'say'
+          ? // A review's Say-it card: spoken, then written down by speech recognition (2026-11-04).
+            `Say this in ${target}: ${body.task ?? ''}\nThe learner's answer was spoken and written down by speech recognition. Ignore spelling, accents, capitals and punctuation, and a word written as another that sounds the same (the recogniser's mistake, not the learner's). Any natural word order, and any synonym or other phrasing with the same meaning, is correct. Mark it incorrect only for a changed meaning, a missing part of the meaning, or ungrammatical ${target}.`
+          : `Translate into ${target}: ${body.task ?? ''}`;
   try {
     const out = await callStructured(c.env, {
       // Sonnet, not Haiku: marking needs judgement (ambiguous English, alternative phrasings).

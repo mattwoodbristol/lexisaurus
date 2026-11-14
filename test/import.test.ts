@@ -45,6 +45,9 @@ describe('pleco parser', () => {
     expect(plecoGloss('verb renovate; recondition 翻新旧衣服 fānxīn')).toBe('renovate; recondition');
     expect(plecoGloss('noun library')).toBe('library');
     expect(plecoGloss(undefined)).toBeUndefined();
+    expect(plecoGloss('variant of 那 nà')).toBeUndefined();
+    expect(plecoGloss('pronoun old variant of 哪 nǎ')).toBeUndefined();
+    expect(plecoGloss('pronoun that; variant of 那 nà')).toBe('that');
   });
 
   it('dedupes on simplified headword keeping best score and all categories', () => {
@@ -59,6 +62,30 @@ describe('pleco parser', () => {
     expect(tsg.reading).toBe('tú shū guǎn');
     expect(tsg.meta.trad).toBe('圖書館');
     expect(tsg.meta.pleco).toBeUndefined();
+  });
+
+  it('gives a variant the meaning of the word it points to', () => {
+    const rows = plecoToWords([
+      { simp: '那', trad: '那', defn: 'pronoun that; those 那个 nàge that one', categories: [] },
+      { simp: '这', trad: '這', defn: 'pronoun this; these', categories: [] },
+      { simp: '乜', defn: 'variant of 那 nà', categories: [] },
+      { simp: '这儿', defn: 'old variant of 這 zhè', categories: [] },
+      { simp: '冇', defn: 'variant of 无 wú', categories: [] },
+    ]);
+    const gloss = (l: string) => rows.find((r) => r.lemma === l)!.gloss;
+    expect(gloss('乜')).toBe('that; those');
+    expect(gloss('这儿')).toBe('this; these'); // found by traditional headword
+    expect(gloss('冇')).toBeNull(); // target not in the export: Claude glosses it later
+  });
+
+  it('reads through Pleco link marks: an abbreviation takes the full form\'s meaning', () => {
+    const rows = plecoToWords(
+      parsePlecoXml(
+        '<card><entry><headword charset="sc">化学肥料</headword><defn>noun chemical fertilizer</defn></entry></card>' +
+          '<card><entry><headword charset="sc">化肥</headword><defn>abbreviation = \uEAB8\uEABB22930176\uEABC化学肥料\uEABD</defn></entry></card>',
+      ),
+    );
+    expect(rows.find((r) => r.lemma === '化肥')!.gloss).toBe('chemical fertilizer');
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanGloss, contextWindow, isLookupText, tidyListGloss, wordChars } from '../src/core/words/gloss';
+import { cleanGloss, contextWindow, isLookupText, pairMeanings, tidyListGloss, wordChars, xrefTarget } from '../src/core/words/gloss';
 
 describe('tap-to-translate helpers', () => {
   it('accepts short Hanzi words only for zh', () => {
@@ -32,6 +32,30 @@ describe('tap-to-translate helpers', () => {
     expect(tidyListGloss('x; '.repeat(40))).toMatch(/…$/);
   });
 
+  it('drops a cross-reference label whose headword was cut off', () => {
+    expect(tidyListGloss('variant of')).toBeNull();
+    expect(tidyListGloss('old variant of')).toBeNull();
+    expect(tidyListGloss('Erhua variant of;')).toBeNull();
+    expect(tidyListGloss('same as')).toBeNull();
+    expect(tidyListGloss('abbr. for')).toBeNull();
+    expect(tidyListGloss('that; variant of')).toBe('that');
+    expect(tidyListGloss('see')).toBe('see'); // a real meaning, not a label
+    expect(tidyListGloss('look; see')).toBe('look; see');
+    expect(tidyListGloss('a variant of the game')).toBe('a variant of the game');
+    expect(tidyListGloss('variant of 那 nà')).toBeNull();
+    expect(tidyListGloss('that; variant of 那 nà')).toBe('that');
+    expect(xrefTarget('old variant of 這|这 zhè')).toEqual(['这', '這']);
+    expect(xrefTarget('same as before')).toBeNull();
+  });
+
+  it('drops Pleco link marks and entry ids', () => {
+    // As stored by the import, which cut the link's Hanzi off: only the label is left.
+    expect(tidyListGloss('abbreviation = \uEAB8\uEABB22930176\uEABC')).toBeNull();
+    expect(tidyListGloss('fertilizer; see \uEAB8\uEABB22930176\uEABC化学肥料\uEABD')).toBe('fertilizer; see 化学肥料');
+    expect(xrefTarget('abbreviation = 化学肥料')).toEqual(['化学肥料']);
+    expect(tidyListGloss('= 化学肥料')).toBeNull();
+  });
+
   it('breaks multi-character words into distinct characters', () => {
     expect(wordChars('觉得')).toEqual(['觉', '得']);
     expect(wordChars('谢谢')).toEqual(['谢']);
@@ -54,5 +78,37 @@ describe('Pleco gloss extraction', () => {
     expect(plecoGloss('adverb [in questions, often replaced by 多] how; what (degree) 多么好 how good')).toBe('how; what (degree)');
     expect(plecoGloss('adjective good; fine; nice (opp. 坏 huài) 好人 good person')).toBe('good; fine; nice');
     expect(plecoGloss('verb feel 我觉得 I feel')).toBe('feel');
+  });
+});
+
+describe('pairMeanings', () => {
+  it('matches words Claude wrote a little differently', () => {
+    const m = pairMeanings(
+      ['吃', '哪儿/哪里', '（一）点儿'],
+      [
+        { word: '一点儿', meaning: 'a little' },
+        { word: '吃 ', meaning: 'to eat' },
+        { word: '哪里', meaning: 'where' },
+      ],
+    );
+    expect(m.get('吃')).toBe('to eat');
+    expect(m.get('哪儿/哪里')).toBe('where');
+    expect(m.get('（一）点儿')).toBe('a little');
+  });
+  it('falls back to the place in the list when every word has one answer', () => {
+    expect(pairMeanings(['帮助'], [{ word: '帮助 bāngzhù', meaning: 'to help' }]).get('帮助')).toBe('to help');
+  });
+  it('leaves an unmatched word out', () => {
+    expect(pairMeanings(['帮助', '跑步'], [{ word: '唱歌', meaning: 'to sing' }]).size).toBe(0);
+  });
+});
+
+import { isNameGloss } from '../src/core/words/gloss';
+describe('name-only glosses', () => {
+  it('spots a word whose every sense is a name', () => {
+    for (const g of ['Zhu (surname)', 'surname Zhu', 'Li (given name)', 'Wang, a surname', 'family name', 'surname Zhu; Zhu (surname).']) expect(isNameGloss(g), g).toBe(true);
+  });
+  it('keeps words with another meaning, and ordinary words', () => {
+    for (const g of ['vermilion; surname Zhu', 'Beijing (city)', 'name', 'to name; name', 'teacher', '', null]) expect(isNameGloss(g), String(g)).toBe(false);
   });
 });

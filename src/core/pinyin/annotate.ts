@@ -79,6 +79,16 @@ export function unknownWords(tokens: Token[]): string[] {
   return [...seen];
 }
 
+/**
+ * Unknown words to add to the learner's list automatically: unknown words of two or more
+ * characters. A single unknown character is nearly always a piece of a word the segmenter split
+ * off (解释 read as 解 + 释 when the list has 解 but not 解释), and as a list word it would be
+ * reviewed on its own, inside a sentence that uses the whole word. Tapping one still adds it.
+ */
+export function wordsToTrack(tokens: Token[]): string[] {
+  return unknownWords(tokens).filter((w) => Array.from(w).length > 1);
+}
+
 /** All Han substrings up to maxLen, for a single IN (...) lookup against the words table. */
 export function candidateLemmas(text: string, maxLen = 6): string[] {
   const chars = Array.from(text);

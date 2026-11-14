@@ -12,8 +12,8 @@ import { levelCheck, type LevelCheck } from './level';
 import { markDone, type LessonRow } from './lessons';
 import { assessWordsPrompt, starterWordsPrompt, assessWritingPrompt, grammarBankPrompt, pseudoCheckPrompt, sortGlossPrompt, writingPrompt } from '../../prompts';
 import { BANDS, estimateGrammar, estimateVocab, lessonsBelow, levelText, sampleVocab, seededShuffle, bandLabel, starterBands, type GrammarAnswer, type LevelResult, type ListWord } from '../core/assessment/levels';
-import { getSetting, poolMaxBand } from './day';
-import { cleanGloss, tidyListGloss } from '../core/words/gloss';
+import { getSetting, heldBack, holdBack, poolMaxBand } from './day';
+import { cleanGloss, pairMeanings, tidyListGloss } from '../core/words/gloss';
 
 export const assessmentRoutes = new Hono<{ Bindings: Env }>();
 
@@ -142,6 +142,9 @@ assessmentRoutes.post('/:id{[0-9]+}/words', async (c) => {
 const STARTER_MIN = 40;
 /** Starter words asked for per band. */
 const STARTER_PER_BAND = 30;
+/** After a top-up that added fewer than STARTER_MIN_NEW words (Claude suggested words already in the list), the cron waits this long. */
+const STARTER_IDLE_MS = 12 * 3600_000;
+const STARTER_MIN_NEW = 5;
 
 /**
  * Keep the pool stocked at the learner's level (cron): once a level check has measured it, a pool
@@ -150,7 +153,11 @@ const STARTER_PER_BAND = 30;
  */
 export async function topUpStarterPool(env: Env, lang: string): Promise<void> {
   const check = await levelCheck(env.DB, lang);
-  if (check && check.vocab !== null) await fillStarterPool(env, lang, check.vocab);
+  if (!check || check.vocab === null) return;
+  const idleKey = `${lang}.starter_pool_idle`;
+  if (await heldBack(env.DB, idleKey, STARTER_IDLE_MS)) return;
+  const added = await fillStarterPool(env, lang, check.vocab);
+  if (added !== null) await holdBack(env.DB, idleKey, added < STARTER_MIN_NEW);
 }
 
 /**
@@ -158,9 +165,10 @@ export async function topUpStarterPool(env: Env, lang: string): Promise<void> {
  * ones, so reviews introduce everyday words at the learner's level rather than whatever the check
  * turned up, and Sort my words has words to sort.
  */
-async function fillStarterPool(env: Env, lang: string, band: number): Promise<void> {
+/** Words added, or null when the pool did not need any. */
+async function fillStarterPool(env: Env, lang: string, band: number): Promise<number | null> {
   const language = getLanguage(lang);
-  if (!language) return;
+  if (!language) return null;
   const db = env.DB;
   const bands = starterBands(band);
   try {
@@ -168,7 +176,7 @@ async function fillStarterPool(env: Env, lang: string, band: number): Promise<vo
       .prepare(`SELECT COUNT(*) AS n FROM words WHERE lang = ?1 AND status = 'new' AND triaged_at IS NULL AND level IN (${bands.join(',')})`)
       .bind(lang)
       .first<{ n: number }>();
-    if ((have?.n ?? 0) >= STARTER_MIN) return;
+    if ((have?.n ?? 0) >= STARTER_MIN) return null;
     const { results: listed } = await db
       .prepare(`SELECT lemma FROM words WHERE lang = ?1 AND level IN (${bands.join(',')}) ORDER BY id DESC LIMIT 600`)
       .bind(lang)
@@ -192,11 +200,13 @@ async function fillStarterPool(env: Env, lang: string, band: number): Promise<vo
           .prepare(`INSERT INTO words(lang, lemma, reading, gloss, source, status, level) VALUES (?1, ?2, ?3, ?4, 'manual', 'new', ?5) ON CONFLICT(lang, lemma) DO NOTHING`)
           .bind(lang, w.word.trim(), language.hasRomanisation ? pinyinForWord(w.word.trim()) : null, cleanGloss(w.gloss), w.band),
       );
-    if (stmts.length) await db.batch(stmts);
+    const added = stmts.length ? (await db.batch(stmts)).reduce((n, r) => n + (r.meta.changes ?? 0), 0) : 0;
     invalidateDict(lang);
+    return added;
   } catch (e) {
     // No key or budget: the pool fills from lessons and chats as before.
     console.error('starter pool failed', e);
+    return 0;
   }
 }
 
@@ -426,6 +436,7 @@ assessmentRoutes.get('/sort', async (c) => {
   const rows = results.map((w) => ({ ...w, gloss: w.gloss ? tidyListGloss(w.gloss) : null }));
   const round = rows.slice(0, take);
   const missing = round.filter((w) => !w.gloss).slice(0, SORT_GLOSS_MAX);
+  let glossError: string | null = null;
   if (missing.length) {
     try {
       const out = await callStructured(c.env, {
@@ -436,17 +447,23 @@ assessmentRoutes.get('/sort', async (c) => {
         effort: 'low',
         schema: z.object({ words: z.array(z.object({ word: z.string(), meaning: z.string() })) }),
       });
-      const byLemma = new Map(out.words.map((w) => [w.word.trim(), cleanGloss(w.meaning)]));
+      // Matched loosely: a word Claude echoed a little differently would otherwise never get a meaning.
+      const byLemma = pairMeanings(
+        missing.map((w) => w.lemma),
+        out.words,
+      );
       const writes: D1PreparedStatement[] = [];
       for (const w of missing) {
-        const g = byLemma.get(w.lemma);
+        const g = cleanGloss(byLemma.get(w.lemma) ?? '');
         if (!g) continue;
         w.gloss = g;
         writes.push(db.prepare('UPDATE words SET gloss = ?1 WHERE id = ?2').bind(g, w.id));
       }
       if (writes.length) await db.batch(writes);
-    } catch {
-      // Claude unavailable: the words without a meaning wait for a later round.
+    } catch (e) {
+      // Claude unavailable: the words without a meaning can still be sorted by hand, and the
+      // learner is told why there is no meaning.
+      glossError = e instanceof Error ? e.message.slice(0, 200) : 'Claude did not answer';
     }
   }
   const { results: known } = pile
@@ -460,14 +477,16 @@ assessmentRoutes.get('/sort', async (c) => {
     .prepare(`SELECT COUNT(*) AS n FROM words WHERE lang = ?1 AND status = 'new' AND triaged_at IS NULL ${UNDER_MAX_BAND}`)
     .bind(lang, 0, maxBand)
     .first<{ n: number }>();
+  const shown = (w: Row) => ({
+    ...w,
+    reading: w.reading ?? (lang === 'zh' ? pinyinForWord(w.lemma) : null),
+    levelLabel: w.level ? bandLabel(lang, w.level) : null,
+  });
   return c.json({
-    words: round
-      .filter((w) => w.gloss)
-      .map((w) => ({
-        ...w,
-        reading: w.reading ?? (lang === 'zh' ? pinyinForWord(w.lemma) : null),
-        levelLabel: w.level ? bandLabel(lang, w.level) : null,
-      })),
+    words: round.filter((w) => w.gloss).map(shown),
+    // Still without a meaning (Claude unavailable or no answer): sorted by hand, never stuck.
+    unglossed: round.filter((w) => !w.gloss).map(shown),
+    glossError,
     decoys,
     left: left?.n ?? 0,
     pile,

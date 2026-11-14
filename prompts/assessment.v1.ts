@@ -50,7 +50,7 @@ Return:
 
 /** Sort my words: meanings for list words that have none, so they can go on the matching board. */
 export function sortGlossPrompt(language: string): string {
-  return `You give short English meanings for ${language} dictionary words, for a matching game. For each word, return the word exactly as given and its most common meaning in at most 5 English words (e.g. "to eat", "teacher", "because"). No pinyin, no quotes, no grammar labels. For a name, say so (e.g. "Beijing (city)").`;
+  return `You give short English meanings for ${language} dictionary words, for a matching game. For each word, return the word exactly as given and its most common meaning in at most 5 English words (e.g. "to eat", "teacher", "because"). No pinyin, no quotes, no grammar labels. For a name, say so (e.g. "Beijing (city)"). For a variant form of another word, give that word's meaning, never "variant of".`;
 }
 
 /** Second opinion on made-up words: any that are real get dropped, so knowing them never counts against the learner. */

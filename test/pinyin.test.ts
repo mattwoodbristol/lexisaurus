@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { pinyin } from 'pinyin-pro';
 import { numberedToMarked, markSyllable } from '../src/core/pinyin/tones';
 import { segmentChinese } from '../src/core/pinyin/segment';
-import { annotate, showPinyin, unknownWords, candidateLemmas, nextPinyinMode, type WordInfo, type Token } from '../src/core/pinyin/annotate';
+import { annotate, showPinyin, unknownWords, wordsToTrack, candidateLemmas, nextPinyinMode, type WordInfo, type Token } from '../src/core/pinyin/annotate';
 import { stripPinyin } from '../src/core/pinyin/strip';
 
 const pinyinFor = (text: string) => pinyin(text, { type: 'all' }).map((x) => (x.isZh ? x.pinyin : ''));
@@ -96,6 +96,14 @@ describe('annotate + rule', () => {
 
   it('lists unknown words once each', () => {
     expect(unknownWords(tokens)).toEqual(['来']);
+  });
+
+  it('does not add a character split off a word as a word of its own', () => {
+    const d = new Map<string, WordInfo>([['解', { id: 1, status: 'known', reading: 'jiě' }]]);
+    const t = annotate('老师给我解释了这个问题。', d, pinyinFor);
+    expect(unknownWords(t)).toContain('释');
+    expect(wordsToTrack(t)).not.toContain('释');
+    expect(wordsToTrack(t)).toContain('问题');
   });
 
   it('produces candidate lemmas for a single IN lookup', () => {

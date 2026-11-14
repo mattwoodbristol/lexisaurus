@@ -10,6 +10,8 @@ import type { Mastery } from '../core/lessons/mastery';
 import type { Exercise } from '../core/review/exercise';
 import type { StoryRecap } from '../core/review/story';
 import type { ListeningContent, ListeningKind } from '../core/listening/types';
+import type { ThemeContent } from '../core/themes/types';
+import type { ThemeIdea } from '../core/themes/suggestions';
 
 export class ApiError extends Error {
   constructor(
@@ -42,7 +44,7 @@ const post = (body?: unknown): RequestInit => ({ method: 'POST', body: body === 
 
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.message === 'budget') return 'Daily token budget reached. Reviews still work from cached sentences; chat resumes tomorrow.';
+    if (e.message === 'budget') return 'Daily Claude token budget reached. Raise it in Settings (Daily Claude token budget) to carry on now, or Claude is back after midnight UTC. Reviews still work from cached sentences.';
     if (e.message === 'not_configured') return 'The server has no Claude API key configured.';
     if (e.message === 'plan_failed') return 'Claude could not draft a usable plan this time. Try again, perhaps with simpler goals.';
     return e.detail ? `${e.message}: ${e.detail}` : e.message;
@@ -177,6 +179,45 @@ export interface ListeningDetail extends ListeningContent {
   knownShare: number | null;
 }
 
+export interface ThemeSummary {
+  id: number;
+  title: string;
+  request: string;
+  items: number;
+  score: number | null;
+  total: number | null;
+  practised_at: string | null;
+  daily: number;
+  days_done: number;
+  days: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThemeToday {
+  id: number;
+  title: string;
+  day: number;
+  days: number;
+  dayTitle: string | null;
+  doneToday: boolean;
+}
+
+export interface ThemeDetail extends ThemeContent {
+  id: number;
+  lang: string;
+  request: string;
+  score: number | null;
+  total: number | null;
+  practisedAt: string | null;
+  createdAt: string;
+  daily: boolean;
+  daysDone: number;
+  doneToday: boolean;
+}
+
+export type WordStatus = 'known' | 'learning' | 'new' | 'unknown';
+
 export interface CheckSubmitResult {
   score: number;
   total: number;
@@ -255,8 +296,8 @@ export interface ReviewSummary {
 
 export interface DailySession {
   lang: string;
-  reviews: { remaining: number; doneToday: number; due: number; limit: number; done: boolean };
-  grammar: { cardId: number; pointId: number; title: string; summary: string | null; lessonId: number | null; done: boolean } | null;
+  reviews: { remaining: number; doneToday: number; due: number; dueGrammar: number; limit: number; done: boolean };
+  grammar: { cardId: number; pointId: number; title: string; summary: string | null; lessonId: number | null; done: boolean; doneToday: number; perDay: number } | null;
   lesson: { title: string | null; done: boolean } | null;
   listening: { done: boolean };
   conversation: { done: boolean; userTurnsToday: number; needed: number; topic: Topic | null; conversationId: number | null };
@@ -316,7 +357,7 @@ export const api = {
   lessonUndone: (id: number) => request<{ ok: true }>(`/api/lessons/${id}/undone`, post()),
   lessonStep: (id: number, step: StepKey) => request<{ ok: true; stepsDone: StepKey[] }>(`/api/lessons/${id}/progress`, post({ step })),
   warmup: (id: number) => request<{ items: (WarmupItem & { lessonId: number; lessonTitle: string })[]; annotations: Record<string, Token[]> }>(`/api/lessons/${id}/warmup`),
-  grade: (lessonId: number, kind: 'translate' | 'fix' | 'cloze', task: string, expected: string, answer: string, lang?: string) =>
+  grade: (lessonId: number, kind: 'translate' | 'fix' | 'cloze' | 'say', task: string, expected: string, answer: string, lang?: string) =>
     request<GradeResult>('/api/lessons/grade', post({ lessonId, kind, task, expected, answer, lang })),
   queryMark: (ctx: QueryContext & { note?: string }) => request<QueryResult>('/api/lessons/query', post(ctx)),
   updates: () => request<UpdateStatus>('/api/updates'),
@@ -326,15 +367,19 @@ export const api = {
   submitCheck: (id: number, results: { kind: string; right: boolean; answer: string }[]) => request<CheckSubmitResult>(`/api/lessons/${id}/check`, post({ results })),
   generateLesson: (lang: string, title?: string) => request<{ id: number; title: string }>('/api/lessons/generate', post({ lang, ...(title ? { title } : {}) })),
 
-  prepareReview: (lang: string) => request<{ status: string }>(`/api/review/prepare?lang=${lang}`, post()),
+  /** Write the next set's story ahead: the set after `skip` (a set being shown), of `limit` cards. */
+  prepareReview: (lang: string, skip: number[] = [], limit?: number) =>
+    request<{ status: string }>(`/api/review/prepare?lang=${lang}${skip.length ? `&skip=${skip.join(',')}` : ''}${limit ? `&limit=${limit}` : ''}`, post()),
   reviewSummary: (lang: string) => request<ReviewSummary>(`/api/review/summary?lang=${lang}`),
   knownCount: (lang: string) => request<{ known: number }>(`/api/review/known?lang=${lang}`),
-  reviewNext: (lang: string, skip: number[] = [], include?: number, limit?: number) =>
+  /** `grammar`: Grammar of the day's Practise, up to that many grammar points (not a review set). */
+  reviewNext: (lang: string, skip: number[] = [], limit?: number, grammar?: number) =>
     request<{ items: ReviewItem[]; annotations?: Record<string, Token[]>; notice: string | null; limitReached?: boolean; story?: StoryRecap | null }>(
-      `/api/review/next?lang=${lang}&skip=${skip.join(',')}${include ? `&include=${include}` : ''}${limit ? `&limit=${limit}` : ''}`,
+      `/api/review/next?lang=${lang}&skip=${skip.join(',')}${limit ? `&limit=${limit}` : ''}${grammar ? `&grammar=${grammar}` : ''}`,
     ),
-  answer: (cardId: number, rating: 1 | 2 | 3 | 4, kind?: string, exerciseId?: number, quiz?: { score: number; total: number }) =>
-    request<{ due: string; status: string | null; statusChanged: boolean; lessonPassed?: boolean }>(`/api/review/${cardId}`, post({ rating, kind, exerciseId, quiz })),
+  /** `via` 'practise': answered from Grammar of the day's Practise (what ticks it). */
+  answer: (cardId: number, rating: 1 | 2 | 3 | 4, kind?: string, exerciseId?: number, quiz?: { score: number; total: number }, via?: 'practise') =>
+    request<{ due: string; status: string | null; statusChanged: boolean; lessonPassed?: boolean }>(`/api/review/${cardId}`, post({ rating, kind, exerciseId, quiz, ...(via ? { via } : {}) })),
 
   lookup: (lang: string, text: string, context = '') =>
     request<WordLookup>(`/api/words/lookup?lang=${lang}&text=${encodeURIComponent(text)}&context=${encodeURIComponent(context.slice(0, 300))}`),
@@ -353,6 +398,17 @@ export const api = {
   newListening: (lang: string, kind: ListeningKind) => request<{ id: number }>('/api/listening/generate', post({ lang, kind })),
   listening: (id: number) => request<{ listening: ListeningDetail; annotations: Record<string, Token[]> }>(`/api/listening/${id}`),
   listeningResult: (id: number, score: number, total: number) => request<{ ok: true }>(`/api/listening/${id}/result`, post({ score, total })),
+  themes: (lang: string) => request<{ items: ThemeSummary[]; ideas: ThemeIdea[] }>(`/api/themes?lang=${lang}`),
+  themeIdeas: (lang: string) => request<{ ideas: ThemeIdea[] }>('/api/themes/ideas', post({ lang })),
+  themesToday: (lang: string) => request<{ themes: ThemeToday[] }>(`/api/themes/today?lang=${lang}`),
+  newTheme: (lang: string, name: string, opts: { hint?: string; days?: number; daily?: boolean } = {}) => request<{ id: number }>('/api/themes/generate', post({ lang, name, ...opts })),
+  themeDay: (id: number, day: number) => request<{ ok: true }>(`/api/themes/${id}/days/${day}`, post()),
+  themeDayDone: (id: number, day: number, score: number, total: number) => request<{ ok: true; added: number }>(`/api/themes/${id}/days/${day}/done`, post({ score, total })),
+  themeDaily: (id: number, daily: boolean) => request<{ ok: true }>(`/api/themes/${id}/daily`, { method: 'PUT', body: JSON.stringify({ daily }) }),
+  theme: (id: number) => request<{ theme: ThemeDetail; annotations: Record<string, Token[]>; statuses: Record<string, WordStatus> }>(`/api/themes/${id}`),
+  themeLearn: (id: number, lemmas?: string[]) => request<{ added: number }>(`/api/themes/${id}/learn`, post({ lemmas })),
+  themeResult: (id: number, score: number, total: number) => request<{ ok: true }>(`/api/themes/${id}/result`, post({ score, total })),
+  deleteTheme: (id: number) => request<{ ok: true }>(`/api/themes/${id}`, { method: 'DELETE' }),
   coursePlan: (lang: string, goals: string, count: number, topics: boolean) => request<CoursePlan>(`/api/course/${lang}/plan`, post({ goals, count, topics })),
 };
 
@@ -409,7 +465,7 @@ export interface SortWord {
   id: number;
   lemma: string;
   reading: string | null;
-  /** Always set: words without a meaning are left out of a round. */
+  /** Always set: words without a meaning come separately (unglossed), sorted by hand. */
   gloss: string;
   level: number | null;
   levelLabel: string | null;
@@ -428,7 +484,9 @@ export const levelApi = {
   skipLessons: (lessonIds: number[]) => request<{ ok: true; done: number }>('/api/assessment/skip-lessons', post({ lessonIds })),
   status: (lang: string) => request<{ check: LevelCheckInfo | null; labels: LevelLabels | null; unsorted: number; pile: SortPile | null }>(`/api/assessment/status?lang=${lang}`),
   sortNext: (lang: string, limit: number) =>
-    request<{ words: SortWord[]; decoys: string[]; left: number; pile: SortPile | null }>(`/api/assessment/sort?lang=${lang}&limit=${limit}`),
+    request<{ words: SortWord[]; unglossed?: Omit<SortWord, 'gloss'>[]; glossError?: string | null; decoys: string[]; left: number; pile: SortPile | null }>(
+      `/api/assessment/sort?lang=${lang}&limit=${limit}`,
+    ),
   sortOne: (lang: string, id: number, known: boolean) => request<{ ok: true }>('/api/assessment/sort', post({ lang, id, known })),
   sortUndo: (lang: string, id: number) => request<{ ok: true }>('/api/assessment/sort/undo', post({ lang, id })),
 };

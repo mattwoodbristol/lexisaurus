@@ -44,3 +44,27 @@ export function linesBefore(lines: StoryLine[], at: number, answer?: string): St
   const shown = lines.slice(Math.max(0, from), at);
   return answer ? shown.filter((l) => !l.zh.includes(answer)) : shown;
 }
+
+/**
+ * The lines after the last tested line: linking lines that end the story. Shown on the last card
+ * once it is answered, so the story reads to its end before the whole story is shown. Empty for any
+ * other line (the lines after it open the next card instead).
+ */
+export function linesAfter(lines: StoryLine[], at: number): StoryLine[] {
+  const rest = lines.slice(at + 1);
+  return rest.some((l) => l.id !== undefined) ? [] : rest;
+}
+
+/**
+ * The story as a set tells it: a tested line whose word has no card in the set (a story written
+ * ahead for words not all due now) reads as a linking line, so the parts number only the set's
+ * cards. `carded`: the sentence ids of the lines that are cards.
+ */
+export function tellable(lines: StoryLine[], carded: Set<number>): StoryLine[] {
+  return lines.map((l) => (l.id === undefined || carded.has(l.id) ? l : { zh: l.zh, en: l.en }));
+}
+
+/** A tested line's part number: tested lines up to and including it. */
+export function partAt(lines: StoryLine[], at: number): number {
+  return lines.slice(0, at + 1).filter((l) => l.id !== undefined).length;
+}

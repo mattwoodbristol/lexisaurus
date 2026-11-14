@@ -15,7 +15,7 @@ function useSameText(): (a: string, b: string) => boolean {
   return (a, b) => sameText(script, a, b);
 }
 import { Lexi, useLexiStage } from './mascot/lexi';
-import { DEFAULT_STEP_COUNTS, STEP_LABEL, joinTiles, moveTile, shuffle, splitDrills, stepCounts, stepsFor, tilesFor, type StepCounts, type StepKey, type WarmupItem } from '../core/lessons/steps';
+import { DEFAULT_STEP_COUNTS, STEP_LABEL, joinTiles, moveTile, randomSeed, shuffle, shuffleChoices, splitDrills, stepCounts, stepsFor, tilesFor, type StepCounts, type StepKey, type WarmupItem } from '../core/lessons/steps';
 import type { LessonCheckItem, LessonChoice } from '../core/lessons/types';
 import type { PinyinMode, Token } from '../core/pinyin/annotate';
 import { quizRating } from '../core/lessons/mastery';
@@ -106,7 +106,7 @@ export function QueryButton({ ctx, ann, mode, onRight }: ZhProps & { ctx: QueryC
 
 /** Multiple choice with feedback after each answer (recognise, warm-up). */
 function ChoiceRun({
-  items,
+  items: given,
   ann,
   mode,
   onDone,
@@ -114,6 +114,9 @@ function ChoiceRun({
   lessonId,
   place,
 }: ZhProps & { items: (LessonChoice & { note?: string; lessonId?: number })[]; onDone: () => void; intro: string; lessonId: number; place: string }) {
+  // Options in a new order each time, so an answer is not remembered by its place in the list.
+  const [seed] = useState(randomSeed);
+  const items = useMemo(() => shuffleChoices(given, seed), [seed, JSON.stringify(given)]);
   const [i, setI] = useState(0);
   const [chosen, setChosen] = useState<number | null>(null);
   const [right, setRight] = useState(0);
@@ -421,7 +424,9 @@ function TypedRun({ items, lessonId, ann, mode, onDone, intro }: ZhProps & { ite
 }
 
 /** The scored lesson check: answer everything, then see the marks. */
-function CheckRun({ items, lessonId, passMark, ann, mode, onSubmitted }: ZhProps & { items: LessonCheckItem[]; lessonId: number; passMark: number; onSubmitted: (r: CheckSubmitResult) => void }) {
+function CheckRun({ items: given, lessonId, passMark, ann, mode, onSubmitted }: ZhProps & { items: LessonCheckItem[]; lessonId: number; passMark: number; onSubmitted: (r: CheckSubmitResult) => void }) {
+  const [seed] = useState(randomSeed);
+  const items = useMemo(() => shuffleChoices(given, seed), [seed, JSON.stringify(given)]);
   const target = useTargetName();
   const sameZh = useSameText(); // compares by the lesson language's rules
   const [answers, setAnswers] = useState<(string | number | null)[]>(() => items.map(() => null));
@@ -542,10 +547,12 @@ function CheckRun({ items, lessonId, passMark, ann, mode, onSubmitted }: ZhProps
 const QUIZ_RATING_LABEL: Record<1 | 2 | 3, string> = { 1: 'Pass: it comes back soon', 2: 'Hard', 3: 'Good' };
 
 /**
- * The grammar review in Reviews: three questions from the lesson, marked one by one, with the
+ * The grammar review in Reviews: questions from the lesson (review.quiz_questions), marked one by one, with the
  * review rating worked out from the score (all right = Good, one wrong = Hard, else Pass).
  */
-export function QuizRun({ items, lessonId, ann, mode, onDone }: ZhProps & { items: LessonCheckItem[]; lessonId: number; onDone: (score: number, total: number) => void }) {
+export function QuizRun({ items: given, lessonId, ann, mode, onDone }: ZhProps & { items: LessonCheckItem[]; lessonId: number; onDone: (score: number, total: number) => void }) {
+  const [seed] = useState(randomSeed);
+  const items = useMemo(() => shuffleChoices(given, seed), [seed, JSON.stringify(given)]);
   const target = useTargetName();
   const sameZh = useSameText(); // compares by the lesson language's rules
   const [i, setI] = useState(0);

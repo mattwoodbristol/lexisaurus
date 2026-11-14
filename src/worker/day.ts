@@ -40,3 +40,18 @@ export async function enabledLanguages(db: D1Database): Promise<string[]> {
   const ids = Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && !!getLanguage(x)) : [];
   return ids.length ? ids : [...DEFAULT_ENABLED];
 }
+
+/**
+ * Background jobs that call Claude (every cron run) wait after a run that got nothing done, so a
+ * job that keeps failing does not spend the day's token budget. The time of that run is kept in
+ * the setting `key`.
+ */
+export async function heldBack(db: D1Database, key: string, ms: number): Promise<boolean> {
+  const at = Date.parse(await getSetting<string>(db, key, ''));
+  return Date.now() - at < ms;
+}
+
+export async function holdBack(db: D1Database, key: string, idle: boolean): Promise<void> {
+  if (idle) await db.prepare('INSERT INTO settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(key, JSON.stringify(new Date().toISOString())).run();
+  else await db.prepare('DELETE FROM settings WHERE key = ?1').bind(key).run();
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, ApiError, errorText, levelApi, type ConversationSummary, type DailySession, type NextLesson, type SortPile, type Topic, type UpdateStatus } from './api';
+import { api, ApiError, errorText, levelApi, type ConversationSummary, type DailySession, type NextLesson, type SortPile, type ThemeToday, type Topic, type UpdateStatus } from './api';
 import { PageQuery } from './page-query';
 import { Chat } from './chat';
 import { LessonsIndex, LessonPage } from './lessons';
@@ -13,6 +13,7 @@ import { Welcome } from './welcome';
 import { IosInstallCard } from './install';
 import { Course } from './course';
 import { ListeningIndex, ListeningPage } from './listening';
+import { ThemesIndex, ThemePage } from './themes';
 import { TrackwayCard } from './trackway';
 import { pushState, enablePush, type PushState } from './push';
 
@@ -22,11 +23,13 @@ type Route =
   | { name: 'chat'; id: number }
   | { name: 'lessons' }
   | { name: 'lesson'; id: number }
-  | { name: 'review'; include?: number }
+  | { name: 'review'; grammar?: number }
   | { name: 'settings' }
   | { name: 'course' }
   | { name: 'listen' }
   | { name: 'listening'; id: number }
+  | { name: 'themes' }
+  | { name: 'theme'; id: number }
   | { name: 'keyboard-test' }
   | { name: 'level-check' }
   | { name: 'sort-words' };
@@ -40,11 +43,15 @@ function parseRoute(hash: string): Route {
   if (m) return { name: 'chat', id: Number(m[1]) };
   m = /^#\/lesson\/(\d+)$/.exec(hash);
   if (m) return { name: 'lesson', id: Number(m[1]) };
-  m = /^#\/review(?:\/(\d+))?$/.exec(hash);
-  if (m) return m[1] ? { name: 'review', include: Number(m[1]) } : { name: 'review' };
+  // #/review/grammar/N: Grammar of the day's Practise, N points (#/review/<card> from older links).
+  m = /^#\/review(?:\/grammar\/(\d+)|\/(\d+))?$/.exec(hash);
+  if (m) return m[1] ? { name: 'review', grammar: Number(m[1]) } : m[2] ? { name: 'review', grammar: 1 } : { name: 'review' };
   m = /^#\/listen\/(\d+)$/.exec(hash);
   if (m) return { name: 'listening', id: Number(m[1]) };
   if (hash === '#/listen') return { name: 'listen' };
+  m = /^#\/themes\/(\d+)$/.exec(hash);
+  if (m) return { name: 'theme', id: Number(m[1]) };
+  if (hash === '#/themes') return { name: 'themes' };
   if (hash === '#/lessons') return { name: 'lessons' };
   if (hash === '#/settings') return { name: 'settings' };
   if (hash === '#/course') return { name: 'course' };
@@ -63,7 +70,7 @@ function href(r: Route): string {
     case 'lessons':
       return '#/lessons';
     case 'review':
-      return r.include ? `#/review/${r.include}` : '#/review';
+      return r.grammar ? `#/review/grammar/${r.grammar}` : '#/review';
     case 'settings':
       return '#/settings';
     case 'course':
@@ -72,6 +79,10 @@ function href(r: Route): string {
       return '#/listen';
     case 'listening':
       return `#/listen/${r.id}`;
+    case 'themes':
+      return '#/themes';
+    case 'theme':
+      return `#/themes/${r.id}`;
     case 'level-check':
       return '#/level-check';
     case 'sort-words':
@@ -178,7 +189,7 @@ export function App() {
           />
         );
       case 'review':
-        return <Review onBack={home} include={route.include} />;
+        return <Review onBack={home} grammar={route.grammar} />;
       case 'settings':
         return <Settings onBack={home} onCourse={() => go({ name: 'course' })} />;
       case 'course':
@@ -187,6 +198,10 @@ export function App() {
         return <ListeningIndex onBack={home} onOpen={(id) => go({ name: 'listening', id })} />;
       case 'listening':
         return <ListeningPage id={route.id} onBack={() => history.back()} onIndex={() => go({ name: 'listen' })} />;
+      case 'themes':
+        return <ThemesIndex onBack={home} onOpen={(id) => go({ name: 'theme', id })} />;
+      case 'theme':
+        return <ThemePage id={route.id} onBack={() => go({ name: 'themes' })} onIndex={() => go({ name: 'themes' })} onChat={(id) => go({ name: 'chat', id })} />;
       case 'level-check':
         return <LevelCheck onBack={home} onSortWords={() => go({ name: 'sort-words' })} />;
       case 'sort-words':
@@ -269,6 +284,7 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
   const [skipped, setSkipped] = useState<number[]>([]);
   const [nextLesson, setNextLesson] = useState<NextLesson | null | undefined>(undefined);
   const [convs, setConvs] = useState<ConversationSummary[]>([]);
+  const [themes, setThemes] = useState<ThemeToday[]>([]);
   const [push, setPush] = useState<PushState | null>(null);
   const [usage, setUsage] = useState('');
   const [err, setErr] = useState('');
@@ -306,6 +322,11 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
     api
       .conversations(lang)
       .then((r) => setConvs(r.conversations))
+      .catch(() => {});
+    setThemes([]);
+    api
+      .themesToday(lang)
+      .then((r) => setThemes(r.themes))
       .catch(() => {});
     pushState().then(setPush);
     api
@@ -442,7 +463,11 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
           ) : (
             <span class="muted">…</span>
           )}
-          {s && <div class="muted small">{s.reviews.due} due in total · cap {s.reviews.limit} a day</div>}
+          {s && (
+            <div class="muted small">
+              {s.reviews.dueGrammar ? `${s.reviews.due - s.reviews.dueGrammar} words and ${s.reviews.dueGrammar} grammar due` : `${s.reviews.due} due in total`} · cap {s.reviews.limit} a day
+            </div>
+          )}
         </div>
         {s && !s.reviews.done && <button onClick={() => go({ name: 'review' })}>Review</button>}
       </div>
@@ -452,7 +477,10 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
         <div class="row">
           <Tick done={!!s?.grammar?.done || (!!s && !s.grammar)} />
           <div class="grow">
-            <div class="muted small">2 · Grammar of the day</div>
+            <div class="muted small">
+              2 · Grammar of the day
+              {s?.grammar && s.grammar.perDay > 1 && ` · ${Math.min(s.grammar.doneToday, s.grammar.perDay)} of ${s.grammar.perDay} done`}
+            </div>
             {s?.grammar ? (
               <>
                 <strong>{s.grammar.title}</strong>
@@ -465,7 +493,7 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
         </div>
         {s?.grammar && (!s.grammar.done || s.grammar.lessonId) && (
           <div class="row" style="margin-top:10px">
-            {!s.grammar.done && <button onClick={() => go({ name: 'review', include: s.grammar!.cardId })}>Practise</button>}
+            {!s.grammar.done && <button onClick={() => go({ name: 'review', grammar: Math.max(1, s.grammar!.perDay - s.grammar!.doneToday) })}>Practise</button>}
             {s.grammar.lessonId && (
               <button class="secondary" onClick={() => go({ name: 'lesson', id: s.grammar!.lessonId! })}>
                 Lesson
@@ -550,6 +578,32 @@ function Home({ onLogout, go }: { onLogout: () => void; go: (r: Route) => void }
             Start “{topic.name}”
           </button>
         )}
+      </div>
+
+      {/* Not part of the daily session: themes followed a day at a time, and the way in to all themes. */}
+      {themes.map((t) => (
+        <div key={t.id} class="card row">
+          <Tick done={t.doneToday} />
+          <div class="grow">
+            <div class="muted small">
+              Theme · day {t.day} of {t.days}
+            </div>
+            <strong>{t.title}</strong>
+            <div class="muted small">{t.doneToday ? (t.day < t.days ? `Done for today · day ${t.day + 1} tomorrow` : 'All days done') : t.dayTitle}</div>
+          </div>
+          <button class={t.doneToday ? 'secondary' : ''} onClick={() => go({ name: 'theme', id: t.id })}>
+            {t.doneToday ? 'Open' : 'Go'}
+          </button>
+        </div>
+      ))}
+      <div class="card row">
+        <div class="grow">
+          <div class="muted small">Themes</div>
+          <div class="small">Talk about one subject in detail over a few days: the body, the home and its fittings, tennis…</div>
+        </div>
+        <button class="secondary" onClick={() => go({ name: 'themes' })}>
+          Themes
+        </button>
       </div>
 
       {convs.length > 0 && (

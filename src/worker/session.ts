@@ -1,5 +1,5 @@
 // The daily session, composed by code and done in this order: due reviews (within the daily cap),
-// one grammar point, a step of the next lesson, a listening, and a conversation on the next topic.
+// grammar points (session.grammar_per_day), a step of the next lesson, a listening, and a conversation on the next topic.
 import { Hono } from 'hono';
 import type { Env } from './env';
 import { dayStartIso, getSetting, localToday } from './day';
@@ -12,8 +12,18 @@ import { trackway, type Trackway } from '../core/trackway';
 
 export interface DailySession {
   lang: string;
-  reviews: { remaining: number; doneToday: number; due: number; limit: number; done: boolean };
-  grammar: { cardId: number; pointId: number; title: string; summary: string | null; lessonId: number | null; done: boolean } | null;
+  reviews: { remaining: number; doneToday: number; due: number; dueGrammar: number; limit: number; done: boolean };
+  grammar: {
+    cardId: number;
+    pointId: number;
+    title: string;
+    summary: string | null;
+    lessonId: number | null;
+    done: boolean;
+    /** Grammar points reviewed today, of session.grammar_per_day. */
+    doneToday: number;
+    perDay: number;
+  } | null;
   /** A step of a lesson done today; null when no lesson is left and none was worked on today. */
   lesson: { title: string | null; done: boolean } | null;
   /** A listening finished today. */
@@ -47,24 +57,48 @@ export async function computeSession(db: D1Database, lang: string): Promise<Dail
   const needed = Number(await getSetting(db, 'session.min_chat_turns', 3)) || 3;
 
   const due = await dueNow(db, lang);
+  // Of those, grammar cards (the rest are words): practising them first takes them out of Review.
+  const dueGrammar =
+    (await db.prepare(`SELECT COUNT(*) AS n FROM srs_cards WHERE lang = ?1 AND item_type = 'grammar_point' AND due_at <= ?2`).bind(lang, now).first<{ n: number }>())?.n ?? 0;
   const doneToday = await reviewedToday(db, lang);
   const remaining = Math.max(0, Math.min(due, limit - doneToday));
 
-  // Grammar point of the day: one already reviewed today, else the most overdue, else the
-  // soonest due (pulled forward), so there is one every day once any lesson is marked done.
-  const gSel = `SELECT s.id AS card_id, g.id AS point_id, g.title, g.summary, g.lesson_id FROM srs_cards s JOIN grammar_points g ON g.id = s.item_id WHERE s.item_type = 'grammar_point' AND s.lang = ?1`;
-  const reviewedG = await db
-    .prepare(`${gSel} AND EXISTS (SELECT 1 FROM reviews r WHERE r.card_id = s.id AND r.reviewed_at >= ?2) LIMIT 1`)
-    .bind(lang, start)
-    .first<{ card_id: number; point_id: number; title: string; summary: string | null; lesson_id: number | null }>();
+  // Grammar of the day: a quiz of session.grammar_per_day examples (default 1), taken in turns from
+  // the grammar points, most overdue first (2026-11-04). Done once that many are answered today
+  // from its Practise; a grammar card met in the day's reviews does not count. Shows the point it
+  // starts with, or once done the last one practised.
+  const perDay = Math.max(1, Math.round(Number(await getSetting(db, 'session.grammar_per_day', 1)) || 1));
   type GRow = { card_id: number; point_id: number; title: string; summary: string | null; lesson_id: number | null };
-  const soonest = () => db.prepare(`${gSel} ORDER BY s.due_at LIMIT 1`).bind(lang).first<GRow>();
-  let nextG = reviewedG ?? (await soonest());
-  // No grammar in the reviews yet: bring in any lesson whose Learn step was done before that
-  // started counting (a lesson in progress, check not yet taken).
-  if (!nextG && (await enterLearntGrammar(db, lang))) nextG = await soonest();
-  const grammar = nextG
-    ? { cardId: nextG.card_id, pointId: nextG.point_id, title: nextG.title, summary: nextG.summary, lessonId: nextG.lesson_id, done: !!reviewedG }
+  const gSel = `SELECT s.id AS card_id, g.id AS point_id, g.title, g.summary, g.lesson_id FROM srs_cards s JOIN grammar_points g ON g.id = s.item_id WHERE s.item_type = 'grammar_point' AND s.lang = ?1`;
+  const grammarDoneRow = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM reviews r JOIN srs_cards s ON s.id = r.card_id
+       WHERE s.item_type = 'grammar_point' AND s.lang = ?1 AND r.reviewed_at >= ?2 AND r.via = 'practise'`,
+    )
+    .bind(lang, start)
+    .first<{ n: number }>();
+  const grammarDoneToday = grammarDoneRow?.n ?? 0;
+  // Grammar from every previous lesson is in the reviews: bring in any not yet there (a lesson
+  // learnt before that started counting, or completed without its Learn step).
+  await enterLearntGrammar(db, lang);
+  const grammarDone = grammarDoneToday >= perDay;
+  const gRow = grammarDone
+    ? await db
+        .prepare(`${gSel} ORDER BY (SELECT MAX(r.reviewed_at) FROM reviews r WHERE r.card_id = s.id AND r.via = 'practise' AND r.reviewed_at >= ?2) DESC LIMIT 1`)
+        .bind(lang, start)
+        .first<GRow>()
+    : await db.prepare(`${gSel} ORDER BY s.due_at LIMIT 1`).bind(lang).first<GRow>();
+  const grammar = gRow
+    ? {
+        cardId: gRow.card_id,
+        pointId: gRow.point_id,
+        title: gRow.title,
+        summary: gRow.summary,
+        lessonId: gRow.lesson_id,
+        done: grammarDone,
+        doneToday: grammarDoneToday,
+        perDay,
+      }
     : null;
 
   // Lesson: any step saved, check taken or lesson marked done today counts (a review quiz passing
@@ -96,7 +130,7 @@ export async function computeSession(db: D1Database, lang: string): Promise<Dail
 
   const s: DailySession = {
     lang,
-    reviews: { remaining, doneToday, due, limit, done: remaining === 0 },
+    reviews: { remaining, doneToday, due, dueGrammar, limit, done: remaining === 0 },
     grammar,
     lesson,
     listening: { done: !!listened },

@@ -19,10 +19,28 @@ export function parseCard(json: string): Card {
 
 export function reviewCard(card: Card, rating: ReviewRating, now: Date): Card {
   const next = scheduler.next(card, now, rating as unknown as Grade).card;
-  return rating === Rating.Again ? spreadAfterPass(next, now) : next;
+  if (rating !== Rating.Again) return capYoung(next, now);
+  // A word still being learnt that is passed comes back the next day, not one to three days out.
+  return card.reps < YOUNG_STEPS_DAYS.length ? { ...next, due: new Date(now.getTime() + DAY_MS - EARLY_MS) } : spreadAfterPass(next, now);
 }
 
 const DAY_MS = 86_400_000;
+
+/**
+ * A new word comes back soon while it is being learnt, whatever FSRS says (it leaves a word rated
+ * Easy on first sight for eight days): at most 1, 2, 4 and 7 days after its first four reviews.
+ */
+export const YOUNG_STEPS_DAYS = [1, 2, 4, 7];
+/** Due a few hours short of the day, so the word is ready by that day's sitting whatever its time. */
+const EARLY_MS = 8 * 3_600_000;
+
+/** Bring a young card's due date forward to its step (YOUNG_STEPS_DAYS), if FSRS put it later. */
+export function capYoung(card: Card, now: Date): Card {
+  const days = YOUNG_STEPS_DAYS[card.reps - 1];
+  if (days === undefined) return card;
+  const cap = now.getTime() + days * DAY_MS - EARLY_MS;
+  return card.due.getTime() > cap ? { ...card, due: new Date(cap) } : card;
+}
 
 /**
  * A passed card does not come back the same day: FSRS would ask again within minutes, which makes

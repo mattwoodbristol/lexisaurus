@@ -8,4 +8,5 @@ Rules:
 - 6 to 16 Chinese characters. Everyday situations; vary the topics.
 - Hanzi only in the "zh" field. Never write pinyin or tone numbers.
 - The sentence must make the meaning of the target word clear from context.
+- Use the target word in its ordinary meaning, never as a person's name or surname.
 - Return one item per target word, with "word" copied exactly.`;

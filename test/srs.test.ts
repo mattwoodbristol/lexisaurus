@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createEmptyCard, State } from 'ts-fsrs';
 import { parseCard, reviewCard, statusAfterReview, isRating } from '../src/core/srs/schedule';
-import { chooseKind, makeExercise, checkCloze, normaliseZh, BLANK } from '../src/core/review/exercise';
+import { chooseKind, stepOf, makeExercise, checkCloze, normaliseZh, BLANK } from '../src/core/review/exercise';
 
 const t0 = new Date('2026-10-04T08:00:00Z');
 const DAY = 86_400_000;
@@ -58,16 +58,31 @@ describe('FSRS scheduling', () => {
 describe('exercises', () => {
   const s = { id: 7, zh: '我们明天去图书馆看书吧。', en: "Let's go to the library to read tomorrow.", target: '图书馆' };
 
-  it('rotates exercise kinds for words and uses en->zh for grammar', () => {
-    expect([0, 1, 2, 3].map((r) => chooseKind(r, true, true))).toEqual(['cloze', 'zh_to_en', 'en_to_zh', 'cloze']);
-    expect(chooseKind(0, true, false)).toBe('en_to_zh');
-    expect(chooseKind(0, false, true)).toBe('flash');
+  const at = (stability: number) => (reps: number) => ({ reps, stability });
+  it('moves a word from recognising to filling in to saying it as its stability grows', () => {
+    expect([1, 2, 3].map((r) => chooseKind(at(1)(r), true, true))).toEqual(['zh_to_en', 'zh_to_en', 'zh_to_en']);
+    expect([1, 2, 3].map((r) => chooseKind(at(6)(r), true, true))).toEqual(['zh_to_en', 'cloze', 'zh_to_en']);
+    expect([0, 1, 2, 3].map((r) => chooseKind(at(30)(r), true, true))).toEqual(['cloze', 'zh_to_en', 'en_to_zh', 'cloze']);
+    expect(chooseKind(at(30)(0), true, false)).toBe('en_to_zh');
+    expect(chooseKind(at(30)(0), false, true)).toBe('flash');
+  });
+
+  it('a missed word drops back to an easier kind', () => {
+    let c = createEmptyCard(t0);
+    let now = t0;
+    for (let i = 0; i < 6; i++) {
+      c = reviewCard(c, 3, now);
+      now = new Date(c.due.getTime());
+    }
+    expect(stepOf(c.stability)).toBe(2);
+    expect(stepOf(reviewCard(c, 1, now).stability)).toBeLessThan(2);
   });
 
   it('adds the matching board for words with a meaning, in place of the flashcard', () => {
-    expect([0, 1, 2, 3, 4].map((r) => chooseKind(r, true, true, 0, true))).toEqual(['cloze', 'match', 'zh_to_en', 'en_to_zh', 'cloze']);
-    expect(chooseKind(0, false, true, 0, true)).toBe('match');
-    expect(chooseKind(0, true, false, 0, true)).toBe('en_to_zh');
+    expect([0, 1, 2, 3, 4].map((r) => chooseKind(at(30)(r), true, true, 0, true))).toEqual(['cloze', 'match', 'zh_to_en', 'en_to_zh', 'cloze']);
+    expect([0, 1].map((r) => chooseKind(at(1)(r), true, true, 0, true))).toEqual(['zh_to_en', 'match']);
+    expect(chooseKind(at(1)(0), false, true, 0, true)).toBe('match');
+    expect(chooseKind(at(1)(0), true, false, 0, true)).toBe('en_to_zh');
     expect(makeExercise('match', s)).toEqual({ kind: 'match' });
   });
 
@@ -76,6 +91,12 @@ describe('exercises', () => {
     expect(e.clozeZh).toBe(`我们明天去${BLANK}看书吧。`);
     expect(e.answerZh).toBe('图书馆');
     expect(e.promptEn).toBe(s.en);
+  });
+
+  it('blanks the whole word, not a match inside another word', () => {
+    const it2 = { id: 9, zh: 'Lucia chiede: fai un nuovo pane o aspetti?', en: 'Lucia asks: will you make a new bread, or will you wait?', target: 'o' };
+    expect(makeExercise('cloze', it2).clozeZh).toBe(`Lucia chiede: fai un nuovo pane ${BLANK} aspetti?`);
+    expect(makeExercise('cloze', { ...it2, zh: "L'acqua è fredda.", target: 'acqua' }).clozeZh).toBe(`L'${BLANK} è fredda.`);
   });
 
   it('falls back from cloze when the target is not in the sentence', () => {

@@ -158,6 +158,23 @@ export function compareSpoken(script: Script, target: string, alternatives: stri
 export const GOOD_ENOUGH = 0.9;
 export const goodEnough = (r: SpokenResult) => r.match || r.score >= GOOD_ENOUGH;
 
+/**
+ * Whether `word` (as it appears in the target sentence) was heard, in the right tone or close to it.
+ * A sentence understood around a missed word is not the word recalled.
+ */
+export function heardWord(r: SpokenResult, word: string): boolean {
+  const sentence = r.parts.map((p) => p.text).join('');
+  const start = sentence.indexOf(word);
+  if (!word || start < 0) return true;
+  const end = start + word.length;
+  let at = 0;
+  return r.parts.every((p) => {
+    const from = at;
+    at += p.text.length;
+    return at <= start || from >= end || p.ok || !!p.close;
+  });
+}
+
 /** Review rating suggested by how much was understood: nearly all Good, most Hard, else Pass. */
 export function spokenRating(r: SpokenResult): 1 | 2 | 3 {
   if (goodEnough(r)) return 3;
@@ -173,4 +190,66 @@ export function soundsFrom(tokens: { text: string; pinyin?: string }[]): Sounds 
     if (syl.length === chars.length) chars.forEach((c, i) => (out[c] = syl[i]!.toLowerCase()));
   }
   return out;
+}
+
+/**
+ * Whether `word` (as written in the target) is in what was said, anywhere: for a spoken answer
+ * judged right in other words, whether it still used the word the card tests.
+ */
+export function saidWord(script: Script, heard: string, word: string): boolean {
+  const w = units(script, word);
+  const h = units(script, normaliseHeard(script, heard));
+  if (!w.length) return true;
+  if (script === 'han') return h.join('').includes(w.join(''));
+  return w.every((x) => h.includes(x));
+}
+
+/**
+ * A hint after a missed try at saying a sentence from its English: which of the target's parts
+ * (the indexes of `SpokenResult.parts`) to show, the rest blanked. Parts said right in any try so
+ * far show, and each miss uncovers about a third of the others still hidden (at least one), in
+ * order. The tested word (`keep`) is never uncovered: it is the answer the card asks for, so it
+ * shows only once said right.
+ */
+export function hintShown(script: Script, parts: SpokenPart[], shown: ReadonlySet<number>, keep?: string): Set<number> {
+  const out = new Set(shown);
+  parts.forEach((p, i) => {
+    if (p.ok) out.add(i);
+  });
+  const tested = testedParts(script, parts, keep);
+  const hidden = parts.map((_, i) => i).filter((i) => !out.has(i) && !tested.has(i));
+  hidden.slice(0, Math.ceil(hidden.length / 3)).forEach((i) => out.add(i));
+  return out;
+}
+
+/** The indexes of the parts that make up `keep` in the sentence: where it is written, else any part made of its units. */
+function testedParts(script: Script, parts: SpokenPart[], keep?: string): Set<number> {
+  const out = new Set<number>();
+  if (!keep?.trim()) return out;
+  const sentence = parts.map((p) => p.text).join('');
+  const start = sentence.indexOf(keep.trim());
+  if (start >= 0) {
+    const end = start + keep.trim().length;
+    let at = 0;
+    parts.forEach((p, i) => {
+      const from = at;
+      at += p.text.length;
+      if (at > start && from < end && units(script, p.text).length) out.add(i);
+    });
+    return out;
+  }
+  // Written in another form (an inflection): any part whose units are all the word's.
+  const kept = units(script, keep);
+  parts.forEach((p, i) => {
+    const u = units(script, p.text);
+    if (u.length && u.every((x) => kept.includes(x))) out.add(i);
+  });
+  return out;
+}
+
+/** A part as a hint shows it while hidden: a blank as long as the word (Latin) or one per character. */
+export function blankPart(script: Script, text: string): string {
+  if (script === 'han') return '＿';
+  // Punctuation stuck to a word ("parco.") stays.
+  return text.replace(/[\p{L}\p{N}'’]/gu, '_');
 }

@@ -7,6 +7,7 @@ import { Lexi, useLexiStage } from './mascot/lexi';
 import { GRAMMAR_MAX_ITEMS, GRAMMAR_START, nextGrammarBand, seededShuffle } from '../core/assessment/levels';
 import { boardGloss } from '../core/assessment/sort-board';
 import { MatchBoardView, useMatchBoard } from './match-board';
+import { speak, useAutoplay, useCanSpeak } from './speech';
 
 type Stage = 'intro' | 'words' | 'grammar' | 'writing' | 'results';
 /** Every third "I know it" on a real word gets a quick meaning question. */
@@ -349,7 +350,7 @@ const SORT_ROUND = 20;
 const SORT_BOARD = 5;
 
 type BoardWord = SortWord & { meaning: string };
-type Round = { words: SortWord[]; decoys: string[]; left: number; pile: SortPile | null };
+type Round = { words: SortWord[]; unglossed?: Omit<SortWord, 'gloss'>[]; glossError?: string | null; decoys: string[]; left: number; pile: SortPile | null };
 interface Sorted {
   word: BoardWord;
   known: boolean;
@@ -365,6 +366,9 @@ interface Sorted {
  */
 export function SortWords({ onBack }: { onBack: () => void }) {
   const { lang, config } = useStudyLang();
+  // Each word is said as it leaves the board (setting review.autoplay), matched or passed over.
+  const autoplay = useAutoplay() ?? false;
+  const canSpeak = useCanSpeak(config.ttsLang);
   const [pile, setPile] = useState<SortPile | null>(null);
   const [left, setLeft] = useState<number | null>(null);
   const [roundSize, setRoundSize] = useState(0);
@@ -373,6 +377,9 @@ export function SortWords({ onBack }: { onBack: () => void }) {
   const [next, setNext] = useState<Round | null>(null);
   const [err, setErr] = useState('');
   const [loaded, setLoaded] = useState(false);
+  // Words Claude could not give a meaning for (and why): sorted by hand, so the pile never sticks.
+  const [byHand, setByHand] = useState<Omit<SortWord, 'gloss'>[]>([]);
+  const [glossError, setGlossError] = useState<string | null>(null);
   // Answers and undos are saved in order, and before the next round is fetched (or a word just
   // sorted could come round again).
   const saving = useRef<Promise<unknown>>(Promise.resolve());
@@ -385,6 +392,7 @@ export function SortWords({ onBack }: { onBack: () => void }) {
   /** A word leaves the board: known (matched first time) or not (a wrong try, or sent off). */
   const m = useMatchBoard<BoardWord>(SORT_BOARD, (word, matched, strikes) => {
     const known = matched && !strikes;
+    if (autoplay && canSpeak) speak(word.lemma, config.ttsLang);
     save(() => levelApi.sortOne(lang, word.id, known)).catch((e) => setErr(errorText(e)));
     setSorted((s) => [...s, { word, known, slip: matched && !known }]);
     setLeft((n) => (n === null ? n : n - 1));
@@ -399,17 +407,34 @@ export function SortWords({ onBack }: { onBack: () => void }) {
     setRoundSize(words.length);
     setSorted([]);
     setNext(null);
+    setByHand(words.length ? [] : (r.unglossed ?? []));
+    setGlossError(r.glossError ?? null);
     m.start(words, r.decoys.map(boardGloss));
     setLoaded(true);
   };
-  useEffect(() => {
+  const fetchRound = () => {
     setLoaded(false);
     setRoundSize(0);
     void levelApi
       .sortNext(lang, SORT_ROUND)
       .then(startRound)
       .catch((e) => setErr(errorText(e)));
-  }, [lang]);
+  };
+  useEffect(fetchRound, [lang]);
+
+  /** A word without a meaning, sorted by hand; once they are all done, the next round comes. */
+  const sortByHand = async (id: number, known: boolean) => {
+    try {
+      await save(() => levelApi.sortOne(lang, id, known));
+    } catch (e) {
+      return setErr(errorText(e));
+    }
+    setLeft((n) => (n === null ? n : n - 1));
+    setPile((p) => (p ? { ...p, left: Math.max(0, p.left - 1) } : p));
+    const rest = byHand.filter((w) => w.id !== id);
+    setByHand(rest);
+    if (!rest.length) fetchRound();
+  };
 
   const roundOver = !!board && board.words.length === 0 && roundSize > 0;
   useEffect(() => {
@@ -496,7 +521,7 @@ export function SortWords({ onBack }: { onBack: () => void }) {
           )}
           {!next ? (
             <p class="muted small">Loading…</p>
-          ) : next.words.length ? (
+          ) : next.words.length || next.unglossed?.length ? (
             <>
               {pile && next.pile?.id !== pile.id && (
                 <p class="small">
@@ -521,7 +546,29 @@ export function SortWords({ onBack }: { onBack: () => void }) {
           </button>
         </div>
       )}
-      {loaded && roundSize === 0 && (
+      {loaded && roundSize === 0 && byHand.length > 0 && (
+        <div class="card lc-part">
+          <p class="small">
+            No meaning to match for {byHand.length === 1 ? 'this word' : 'these words'}
+            {glossError ? ` (Claude: ${glossError})` : ''}. Sort {byHand.length === 1 ? 'it' : 'them'} yourself:
+          </p>
+          {byHand.map((w) => (
+            <div key={w.id} class="row">
+              <span class="grow">
+                <span lang={wordLang}>{w.lemma}</span>
+                {w.reading ? ` ${w.reading}` : ''}
+              </span>
+              <button class="small" onClick={() => sortByHand(w.id, true)}>
+                I know it
+              </button>
+              <button class="secondary small" onClick={() => sortByHand(w.id, false)}>
+                Don't know
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {loaded && roundSize === 0 && byHand.length === 0 && (
         <p>{left ? "Couldn't get meanings for these words just now. Try again later." : 'All sorted. Nothing left in your pool to sort.'}</p>
       )}
       {!loaded && !err && <p class="muted">Loading…</p>}

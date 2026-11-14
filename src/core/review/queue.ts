@@ -15,3 +15,21 @@ export function interleave<T>(reviews: T[], fresh: T[]): T[] {
   }
   return out;
 }
+
+/**
+ * srs_cards.pinned for a theme word not reviewed yet: like a word-sheet pin (1) it skips the daily
+ * new-word ration and the level reach, but it does not go to the front of the queue: theme words
+ * are mixed into each set (themeShare), so a theme a day does not turn every review into it.
+ */
+export const THEME_PIN = 2;
+/** At most this share of a set goes to theme words while other cards are due. */
+export const THEME_SHARE = 1 / 3;
+
+/**
+ * How many theme cards a set of `take` cards gets: up to its share, or more when the other cards
+ * due (`others`) do not fill the set; never more than are waiting (`waiting`).
+ */
+export function themeSlots(take: number, others: number, waiting: number): number {
+  if (take <= 0 || waiting <= 0) return 0;
+  return Math.min(waiting, take, Math.max(Math.ceil(take * THEME_SHARE), take - others));
+}

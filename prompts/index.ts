@@ -8,6 +8,8 @@ export { pageQueryPrompt } from './page-query.v1';
 export { proofreadSentencesPrompt, proofreadLessonPrompt } from './proofread.v1';
 export { ZH_EXERCISES_V1 } from './zh-exercises.v1';
 export { storyPrompt } from './story.v1';
+export { speakPrompt } from './speak.v1';
+export { grammarExamplesPrompt } from './grammar-examples.v1';
 export { GLOSS_V1 } from './gloss.v1';
 export { COURSE_PLAN_V1 } from './course-plan.v1';
 export { promptsFor, hasPrompts, type PromptSet } from './languages';

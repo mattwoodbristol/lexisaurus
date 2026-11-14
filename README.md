@@ -131,10 +131,15 @@ node scripts/smoke-phase2.mjs [--generate]   # end-to-end, real API (--generate 
   course pack's plan, or `<id>.curriculum.ts` before a pack is synced: Mandarin, and A1-B2 for Spanish and French) with Sonnet using structured output, validation and one retry. Marking a
   lesson done puts its grammar points into SRS and starts tracking its words. Search uses an FTS5
   trigram index (3+ characters) with a LIKE fallback for 1-2 character Chinese queries.
-- **Reviews**: FSRS via ts-fsrs. Exercises rotate cloze / Chinese-to-English / English-to-Chinese
-  from cached sentences; missing sentences are generated in one Haiku batch and cached. A word
+- **Reviews**: FSRS via ts-fsrs. Exercises go easy to hard with the card's stability: a shaky word
+  (under 4 days) is recognised (Chinese-to-English, multiple choice, or the matching board), then
+  cloze joins in, and English-to-Chinese (Say it) only from 12 days; a Pass drops it back. Sentences
+  are cached; missing ones are generated in one Haiku batch, may use only known words and learning
+  words past 4 days, and are checked for other unknown words (two rewrites, then left out). A word
   becomes known when stability reaches `srs.graduate_days` (21) and drops back to learning on Pass. Unseen word cards are introduced at
-  `review.new_per_day` (10) a day, HSK level first, shown with their meaning the first time.
+  `review.new_per_day` (10) a day, HSK level first, shown with their meaning the first time; new
+  words pause while 20 or more seen cards are due or 40% of recent reviews are passed (halved
+  from 25%). Multiple-choice options are shuffled each time a question is shown.
   `review.daily_limit` (60) works through the backlog left by the Pleco import a slice a day.
 
 ## Course packs: editing the course
@@ -170,8 +175,8 @@ none, Haiku writes a short gloss once and it is stored (`words.gloss` or `gloss_
 
 ## Phase 3: daily session and reminders
 
-- **Daily session** (`/api/session/today`, home checklist): reviews up to the daily cap, one grammar
-  point of the day (pulled forward if none is due), and a conversation of at least
+- **Daily session** (`/api/session/today`, home checklist): reviews up to the daily cap, grammar
+  points of the day (`session.grammar_per_day`, default 1; pulled forward if none is due), and a conversation of at least
   `session.min_chat_turns` user turns. "Today" is the learner's local day (`tz`, default Europe/London).
 - **Reminders**: the cron runs every 15 minutes; `src/core/notify/schedule.ts` sends a slot from
   `zh.notify_times` once it is reached (catch-up window 2 h), never twice a day, never in

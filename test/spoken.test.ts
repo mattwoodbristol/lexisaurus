@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { compareSpoken, numberToZh, soundsFrom, spokenRating } from '../src/core/speech/compare';
+import { compareSpoken, blankPart, hintShown, heardWord, numberToZh, saidWord, soundsFrom, spokenRating } from '../src/core/speech/compare';
+import { makeExercise } from '../src/core/review/exercise';
 
 describe('numbers the recogniser writes as digits', () => {
   it('writes small numbers as Chinese numerals', () => {
@@ -95,5 +96,69 @@ describe('allowing for the recogniser', () => {
   });
   it('reads sounds from annotation tokens', () => {
     expect(soundsFrom([{ text: '课堂', pinyin: 'kè táng' }, { text: '。' }, { text: '在', pinyin: 'zài' }])).toEqual({ 课: 'kè', 堂: 'táng', 在: 'zài' });
+  });
+});
+
+describe('Say it in the target language', () => {
+  it('keeps the word being practised, to check it was said', () => {
+    const ex = makeExercise('en_to_zh', { id: 1, zh: '我买化肥。', en: 'I buy fertilizer.', target: '化肥' });
+    expect(ex.target).toBe('化肥');
+    expect(ex.clozeZh).toBeUndefined();
+  });
+
+  it('counts the word as said only when its own characters were heard', () => {
+    const target = '姑姑要买化肥，因为家里的树不好。';
+    const right = compareSpoken('han', target, ['姑姑要买化肥因为家里的树不好']);
+    expect(heardWord(right, '化肥')).toBe(true);
+    // Nearly all the sentence, but not the word being practised.
+    const missed = compareSpoken('han', target, ['姑姑要买因为家里的树不好']);
+    expect(heardWord(missed, '化肥')).toBe(false);
+    expect(heardWord(missed, '姑姑')).toBe(true);
+  });
+});
+
+describe('saidWord', () => {
+  it('finds the tested word anywhere in what was said', () => {
+    expect(saidWord('latin', 'Il cane oggi corre nel parco', 'corre')).toBe(true);
+    expect(saidWord('latin', 'Nel parco il cane corre', 'il cane')).toBe(true);
+    expect(saidWord('latin', 'Perche il cane corre', 'perché')).toBe(true);
+    expect(saidWord('latin', 'Il cane va nel parco', 'corre')).toBe(false);
+    expect(saidWord('han', '今天我很忙', '很忙')).toBe(true);
+    expect(saidWord('han', '我今天非常忙', '很忙')).toBe(false);
+  });
+});
+
+describe('hint after a missed Say-it try', () => {
+  const parts = (s: string) => compareSpoken('latin', s, ['']).parts;
+  it('uncovers a third of the hidden words per miss, never the tested word', () => {
+    const p = parts('Il cane corre nel parco.');
+    const words = p.map((x, i) => (x.text.trim() ? i : -1)).filter((i) => i >= 0);
+    let shown = hintShown('latin', p, new Set(), 'corre');
+    const visible = () => words.filter((i) => shown.has(i)).map((i) => p[i]!.text);
+    expect(visible()).toEqual(['Il', 'cane']);
+    shown = hintShown('latin', p, shown, 'corre');
+    expect(visible()).toEqual(['Il', 'cane', 'nel']);
+    shown = hintShown('latin', p, shown, 'corre');
+    shown = hintShown('latin', p, shown, 'corre');
+    expect(visible()).toEqual(['Il', 'cane', 'nel', 'parco.']);
+  });
+  it('does not give away the tested word when the rest was said right', () => {
+    const r = compareSpoken('han', '我很喜欢吃苹果。', ['我很喜欢吃饭']);
+    const shown = hintShown('han', r.parts, new Set(), '苹果');
+    expect(r.parts.map((x, i) => (shown.has(i) ? x.text : '＿')).join('')).toBe('我很喜欢吃＿＿。');
+  });
+  it('shows the tested word once it was said right', () => {
+    const r = compareSpoken('han', '我很喜欢吃苹果。', ['苹果']);
+    const shown = hintShown('han', r.parts, new Set(), '苹果');
+    expect(r.parts.filter((_, i) => shown.has(i)).map((x) => x.text).join('')).toContain('苹果');
+  });
+  it('shows what was said right', () => {
+    const r = compareSpoken('latin', 'Il cane corre nel parco.', ['il cane va']);
+    const shown = hintShown('latin', r.parts, new Set(), 'corre');
+    expect(r.parts.filter((_, i) => shown.has(i)).map((x) => x.text).filter((t) => t.trim())).toEqual(['Il', 'cane', 'nel']);
+  });
+  it('blanks a word letter for letter, keeping punctuation', () => {
+    expect(blankPart('latin', 'parco.')).toBe('_____.');
+    expect(blankPart('han', '狗')).toBe('＿');
   });
 });

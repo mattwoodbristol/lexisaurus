@@ -1,6 +1,6 @@
 // Word list access and the word lifecycle (unknown -> learning with an SRS card).
 import { createEmptyCard } from 'ts-fsrs';
-import { type Token, type WordInfo } from '../core/pinyin/annotate';
+import { wordsToTrack, type Token, type WordInfo } from '../core/pinyin/annotate';
 import { pinyinForWord } from './pinyin';
 import { getLanguage } from '../core/languages';
 import { rulesFor } from '../core/text/rules';
@@ -68,7 +68,8 @@ export async function trackWords(
 
   // Only languages with reliable word splitting add unseen words automatically (Mandarin).
   const autoAdd = getLanguage(lang)?.autoAddUnknownWords ?? true;
-  const unknown = autoAdd ? [...new Set(tokens.filter((t) => t.status === 'unknown' && t.pinyin).map((t) => t.text))] : [];
+  // Single characters are left out: see wordsToTrack.
+  const unknown = autoAdd ? wordsToTrack(tokens) : [];
   for (const lemma of unknown) {
     const reading = pinyinForWord(lemma);
     const ins = await db

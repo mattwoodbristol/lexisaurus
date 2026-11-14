@@ -32,36 +32,94 @@ export interface Exercise {
    */
   choices?: string[];
   choiceAnswer?: string;
-  /** For grammar reviews of lessons with practice sets: a three-question quiz, scored automatically. */
+  /** A short quiz from a lesson, scored automatically. Reviews no longer make one (2026-10-30): a grammar card is one example. */
   quiz?: LessonCheckItem[];
   lessonId?: number;
-  /** The sentence is part `part` of `of` of the batch's story; `prev` is the story so far (linesBefore). */
-  story?: { title: string; part: number; of: number; prev?: { id?: number; zh: string; en: string }[] };
+  /**
+   * The sentence is part `part` of `of` of the batch's story; `prev` is the story so far
+   * (linesBefore), `after` the lines that end it, on the last part (linesAfter).
+   */
+  story?: { title: string; part: number; of: number; prev?: { id?: number; zh: string; en: string }[]; after?: { zh: string; en: string }[] };
 }
 
 export const BLANK = '＿＿';
+
+const LETTER = /[\p{L}\p{M}\p{N}]/u;
+
+/**
+ * The sentence with `target` blanked out, or undefined when it is not there. A whole-word match is
+ * preferred, so "o" in "fai un nuovo pane o aspetti?" blanks the word "o", not the "o" in "nuovo";
+ * scripts written without spaces (Chinese) fall back to the first match.
+ */
+export function blankOut(sentence: string, target: string): string | undefined {
+  if (!target) return undefined;
+  let first = -1;
+  for (let i = sentence.indexOf(target); i >= 0; i = sentence.indexOf(target, i + 1)) {
+    if (first < 0) first = i;
+    const before = sentence[i - 1];
+    const after = sentence[i + target.length];
+    if ((!before || !LETTER.test(before)) && (!after || !LETTER.test(after))) return sentence.slice(0, i) + BLANK + sentence.slice(i + target.length);
+  }
+  return first < 0 ? undefined : sentence.slice(0, first) + BLANK + sentence.slice(first + target.length);
+}
 
 /** Fewest match cards a batch puts on a board; with fewer, those words get another exercise. */
 export const MIN_MATCH = 3;
 
 /**
- * Rotate kinds by review count so the same word is practised in different directions.
- * `salt` (the card id) staggers cards that share a review count, e.g. after a bulk import.
+ * How far a word card has come, from its FSRS stability (days): 0 = still shaky, 1 = getting there,
+ * 2 = solid. Stability grows with each right answer and drops sharply on a Pass, so a word moves up
+ * only as it is got right, and back down when it is missed.
+ */
+export const STEP_STABILITY_DAYS = [4, 12];
+export function stepOf(stability: number): 0 | 1 | 2 {
+  return stability >= STEP_STABILITY_DAYS[1]! ? 2 : stability >= STEP_STABILITY_DAYS[0]! ? 1 : 0;
+}
+
+/** A card's progress as chooseKind needs it. */
+export interface CardProgress {
+  reps: number;
+  stability: number;
+}
+
+/**
+ * Easiest first: a shaky word is recognised (its sentence's meaning, picked from choices, or the
+ * matching board), then filled in (cloze), and only a solid word is said from English.
+ */
+const WORD_STEPS = [['zh_to_en'], ['cloze', 'zh_to_en'], ['cloze', 'zh_to_en', 'en_to_zh']] as const;
+
+/**
+ * The kinds for the card's step rotate by review count, so the same word is practised in different
+ * ways. `salt` (the card id) staggers cards that share a review count, e.g. after a bulk import.
  * `canMatch` (a word with a meaning) adds the matching board to the rotation, and replaces the
  * flashcard for a word without a sentence.
  */
-export function chooseKind(reps: number, hasSentence: boolean, isWord: boolean, salt = 0, canMatch = false): ExerciseKind {
+export function chooseKind(card: CardProgress, hasSentence: boolean, isWord: boolean, salt = 0, canMatch = false): ExerciseKind {
   const match = canMatch && isWord;
   if (!hasSentence) return match ? 'match' : 'flash';
-  if (!isWord) return 'en_to_zh';
-  const kinds = match ? (['cloze', 'match', 'zh_to_en', 'en_to_zh'] as const) : (['cloze', 'zh_to_en', 'en_to_zh'] as const);
-  return kinds[(reps + salt) % kinds.length]!;
+  // A grammar point's example: said from English, then its meaning picked, turn about.
+  if (!isWord) return (['en_to_zh', 'zh_to_en'] as const)[(card.reps + salt) % 2]!;
+  const kinds: ExerciseKind[] = [...WORD_STEPS[stepOf(card.stability)]];
+  if (match) kinds.splice(1, 0, 'match');
+  return kinds[(card.reps + salt) % kinds.length]!;
 }
 
 /** Word cards never reviewed before are introduced first; after that the kinds rotate. */
-export function kindFor(reps: number, hasSentence: boolean, isWord: boolean, salt = 0, canMatch = false): ExerciseKind {
-  if (isWord && reps === 0) return 'intro';
-  return chooseKind(reps, hasSentence, isWord, salt, canMatch);
+export function kindFor(card: CardProgress, hasSentence: boolean, isWord: boolean, salt = 0, canMatch = false): ExerciseKind {
+  if (isWord && card.reps === 0) return 'intro';
+  return chooseKind(card, hasSentence, isWord, salt, canMatch);
+}
+
+/**
+ * A word told in its set's story keeps a kind that shows its story line. The kind depends on the
+ * set (a matching board needs a few words), and a story carried on after a reload is a smaller set,
+ * so a word could otherwise become a board or Say-it card and drop out of the story. A shaky word
+ * (step 0) keeps to the meaning of its line.
+ */
+export function storyKind(kind: ExerciseKind, card: CardProgress, salt = 0): ExerciseKind {
+  if (kind === 'intro' || kind === 'cloze' || kind === 'zh_to_en') return kind;
+  if (stepOf(card.stability) === 0) return 'zh_to_en';
+  return (['cloze', 'zh_to_en'] as const)[(card.reps + salt) % 2]!;
 }
 
 export function makeExercise(kind: ExerciseKind, s: Sentence | undefined): Exercise {
@@ -70,14 +128,15 @@ export function makeExercise(kind: ExerciseKind, s: Sentence | undefined): Exerc
   // A quiz is built from the lesson, not from a cached sentence (see the review route).
   if (!s || kind === 'flash' || kind === 'quiz') return { kind: 'flash' };
   switch (kind) {
-    case 'cloze':
-      if (s.target && s.zh.includes(s.target))
-        return { kind, sentenceId: s.id, clozeZh: s.zh.replace(s.target, BLANK), promptEn: s.en, answerZh: s.target };
+    case 'cloze': {
+      const clozeZh = s.target ? blankOut(s.zh, s.target) : undefined;
+      if (clozeZh) return { kind, sentenceId: s.id, clozeZh, promptEn: s.en, answerZh: s.target! };
       return { kind: 'zh_to_en', sentenceId: s.id, promptZh: s.zh, answerEn: s.en, ...(s.target ? { target: s.target } : {}) };
+    }
     case 'zh_to_en':
       return { kind, sentenceId: s.id, promptZh: s.zh, answerEn: s.en, ...(s.target ? { target: s.target } : {}) };
     case 'en_to_zh':
-      return { kind, sentenceId: s.id, promptEn: s.en, answerZh: s.zh };
+      return { kind, sentenceId: s.id, promptEn: s.en, answerZh: s.zh, ...(s.target ? { target: s.target } : {}) };
   }
 }
 

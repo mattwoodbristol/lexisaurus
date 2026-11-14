@@ -19,10 +19,11 @@ describe('Pleco status (revised 2026-10-05)', () => {
 
 describe('new-word introduction', () => {
   it('introduces unseen word cards, then rotates', () => {
-    expect(kindFor(0, true, true)).toBe('intro');
-    expect(kindFor(0, false, true)).toBe('intro');
-    expect(kindFor(1, true, true)).toBe('zh_to_en');
-    expect(kindFor(0, true, false)).toBe('en_to_zh'); // grammar points are not introduced
+    const fresh = { reps: 0, stability: 0 };
+    expect(kindFor(fresh, true, true)).toBe('intro');
+    expect(kindFor(fresh, false, true)).toBe('intro');
+    expect(kindFor({ reps: 1, stability: 2 }, true, true)).toBe('zh_to_en');
+    expect(kindFor(fresh, true, false)).toBe('en_to_zh'); // grammar points are not introduced
   });
   it('carries an example sentence when there is one', () => {
     expect(makeExercise('intro', { id: 5, zh: '他是保安。', en: 'He is a security guard.' })).toEqual({
@@ -49,5 +50,19 @@ describe('interleave', () => {
     expect(interleave([], ['n'])).toEqual(['n']);
     expect(interleave(['r'], [])).toEqual(['r']);
     expect(interleave(['r'], ['n1', 'n2', 'n3'])).toHaveLength(4);
+  });
+});
+
+import { themeSlots } from '../src/core/review/queue';
+describe('theme words in a review set', () => {
+  it('take up to a third of the set while other cards are due', () => {
+    expect(themeSlots(30, 40, 20)).toBe(10);
+    expect(themeSlots(10, 40, 20)).toBe(4);
+  });
+  it('fill the set when few other cards are due, and never exceed what waits', () => {
+    expect(themeSlots(30, 5, 40)).toBe(25);
+    expect(themeSlots(30, 5, 8)).toBe(8);
+    expect(themeSlots(30, 40, 0)).toBe(0);
+    expect(themeSlots(0, 0, 10)).toBe(0);
   });
 });

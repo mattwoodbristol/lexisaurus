@@ -32,6 +32,7 @@ interface Form {
   budget: number;
   graduateDays: number;
   chatTurns: number;
+  grammarPerDay: number;
   recogniseCount: number;
   buildCount: number;
   produceCount: number;
@@ -278,6 +279,7 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
           budget: Number(s['daily_token_budget'] ?? 200000),
           graduateDays: Number(s['srs.graduate_days'] ?? 21),
           chatTurns: Number(s['session.min_chat_turns'] ?? 3),
+          grammarPerDay: Number(s['session.grammar_per_day'] ?? 1),
           recogniseCount: stepCounts(s).recognise,
           buildCount: stepCounts(s).build,
           produceCount: stepCounts(s).produce,
@@ -313,6 +315,7 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
         api.putSetting('daily_token_budget', Math.max(1000, Math.round(f.budget))),
         api.putSetting('srs.graduate_days', Math.max(1, Math.round(f.graduateDays))),
         api.putSetting('session.min_chat_turns', Math.max(1, Math.round(f.chatTurns))),
+        api.putSetting('session.grammar_per_day', Math.max(1, Math.round(f.grammarPerDay))),
         api.putSetting('lesson.recognise_count', Math.max(1, Math.round(f.recogniseCount))),
         api.putSetting('lesson.build_count', Math.max(1, Math.round(f.buildCount))),
         api.putSetting('lesson.produce_count', Math.max(1, Math.round(f.produceCount))),
@@ -462,6 +465,10 @@ export function Settings({ onBack, onCourse }: { onBack: () => void; onCourse: (
         <label>
           <div class="label">New words per day (cards you have not seen before; 0 = none)</div>
           {num(form.newPerDay, 'newPerDay')}
+        </label>
+        <label>
+          <div class="label">Grammar points per day (today’s grammar on the home screen)</div>
+          {num(form.grammarPerDay, 'grammarPerDay')}
         </label>
         <label>
           <div class="label">Corrections in chat (everything is listed when you tap Finish; lesson practice chats are always Strict)</div>

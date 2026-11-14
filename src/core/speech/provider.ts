@@ -14,6 +14,13 @@ export interface ListenOptions {
   onInterim?: (text: string) => void;
   /** Abort stops listening; whatever was heard so far is returned. */
   signal?: AbortSignal;
+  /** Keep waiting this long (ms) for the learner to start speaking, past the recogniser's own timeout. */
+  waitMs?: number;
+  /**
+   * Whether what was heard is all of it. While it says no, a pause does not end listening: the
+   * recogniser listens again and adds what comes next, until a turn hears nothing more.
+   */
+  complete?: (heard: string[]) => boolean;
 }
 
 export interface SpeechProvider {

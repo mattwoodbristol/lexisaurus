@@ -1,6 +1,7 @@
 // Parse a Pleco flashcard XML export (formatversion 2) and apply the author's status rules.
 import { numberedToMarked } from '../pinyin/tones';
 import type { StoredStatus } from '../pinyin/annotate';
+import { dropXrefLabel, stripPlecoMarkup, xrefTarget } from '../words/gloss';
 
 export interface PlecoScore {
   score: number;
@@ -53,7 +54,8 @@ export function parsePlecoXml(xml: string): PlecoCard[] {
     const card: PlecoCard = { simp: decode(simp).trim(), categories };
     if (trad) card.trad = decode(trad).trim();
     if (pron) card.pron = decode(pron).trim();
-    if (defn) card.defn = decode(defn).replace(/\s+/g, ' ').trim();
+    // Pleco's link marks and entry ids ("= \uEAB8\uEABB22930176\uEABC化学肥料") are not text.
+    if (defn) card.defn = stripPlecoMarkup(decode(defn));
     if (si) {
       const n = (k: string) => Number(attr(si, k) ?? 0);
       card.score = {
@@ -124,8 +126,14 @@ export function plecoGloss(defn: string | undefined): string | undefined {
     if (open > close) cut = open;
   }
   if (cut > 0) s = s.slice(0, cut);
-  s = s.replace(/\s+/g, ' ').replace(/[;,\s]+$/, '').trim();
+  // A cross-reference cut at its headword ("variant of 那") leaves only a label: no meaning.
+  s = dropXrefLabel(s.replace(/\s+/g, ' '));
   return s.length > 0 ? s.slice(0, 120) : undefined;
+}
+
+/** The headword a cross-reference definition points to ("variant of 那 nà" → ["那"]), or null. */
+export function plecoXref(defn: string | undefined): string[] | null {
+  return defn ? xrefTarget(defn.replace(POS_LABEL, '').replace(/^1\s+/, '')) : null;
 }
 
 export interface PlecoWordRow {
@@ -151,13 +159,26 @@ export function plecoToWords(cards: PlecoCard[]): PlecoWordRow[] {
     prev.defn ||= c.defn;
     prev.trad ||= c.trad;
   }
+  // A variant ("variant of 那 nà") takes the meaning of the word it points to, when that is in the
+  // export (by simplified or traditional headword). Otherwise it has no gloss and Claude gives one.
+  const byTrad = new Map([...byLemma.values()].filter((c) => c.trad).map((c) => [c.trad as string, c]));
+  const coreGloss = (c: PlecoCard): string | undefined => {
+    const own = plecoGloss(c.defn);
+    if (own) return own;
+    for (const t of plecoXref(c.defn) ?? []) {
+      const target = byLemma.get(t) ?? byTrad.get(t);
+      const g = target && target !== c && !plecoXref(target.defn) ? plecoGloss(target.defn) : undefined;
+      if (g) return g;
+    }
+    return undefined;
+  };
   const rows: PlecoWordRow[] = [];
   for (const c of byLemma.values()) {
     const hsk = hskLevel(c.categories);
     rows.push({
       lemma: c.simp,
       reading: c.pron ? numberedToMarked(c.pron) : null,
-      gloss: plecoGloss(c.defn) ?? null,
+      gloss: coreGloss(c) ?? null,
       status: plecoStatus(c),
       meta: {
         ...(c.trad && c.trad !== c.simp ? { trad: c.trad } : {}),

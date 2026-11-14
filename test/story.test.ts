@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { linesBefore, storyOrder } from '../src/core/review/story';
-import { makeExercise, withFixedSentence } from '../src/core/review/exercise';
+import { linesAfter, linesBefore, partAt, storyOrder, tellable } from '../src/core/review/story';
+import { makeExercise, storyKind, withFixedSentence } from '../src/core/review/exercise';
 import { reachBand, starterBands } from '../src/core/assessment/levels';
 import { storyPrompt, proofreadSentencesPrompt } from '../prompts';
 
@@ -76,5 +76,50 @@ describe('the story so far on a card', () => {
   });
   it('leaves out a line holding the answer', () => {
     expect(linesBefore(lines, 3, 'pane').map((l) => l.zh)).toEqual(['link']);
+  });
+});
+
+describe('story endings and kinds', () => {
+  const lines = [
+    { zh: 'A', en: 'a' },
+    { id: 1, zh: 'B', en: 'b' },
+    { zh: 'C', en: 'c' },
+    { id: 2, zh: 'D', en: 'd' },
+    { zh: 'E', en: 'e' },
+    { zh: 'F', en: 'f' },
+  ];
+  it('gives the last tested line the linking lines that end the story', () => {
+    expect(linesAfter(lines, 3).map((l) => l.zh)).toEqual(['E', 'F']);
+  });
+  it('gives other tested lines nothing: what follows them opens the next card', () => {
+    expect(linesAfter(lines, 1)).toEqual([]);
+  });
+  it('keeps a story word on a kind that shows its line', () => {
+    const solid = { reps: 3, stability: 30 };
+    for (const k of ['intro', 'cloze', 'zh_to_en'] as const) expect(storyKind(k, solid, 7)).toBe(k);
+    for (const k of ['match', 'en_to_zh', 'flash'] as const) expect(['cloze', 'zh_to_en']).toContain(storyKind(k, solid, 7));
+    // A shaky word keeps to the meaning of its line.
+    for (const k of ['match', 'flash'] as const) expect(storyKind(k, { reps: 3, stability: 1 }, 7)).toBe('zh_to_en');
+  });
+});
+
+describe('story parts', () => {
+  const lines = [
+    { id: 1, zh: 'A', en: 'a' },
+    { zh: 'B', en: 'b' },
+    { id: 2, zh: 'C', en: 'c', target: 'C' },
+    { id: 3, zh: 'D', en: 'd' },
+    { id: 4, zh: 'E', en: 'e' },
+  ];
+  it("numbers only the set's cards: a line without one reads as a linking line", () => {
+    const told = tellable(lines, new Set([1, 3, 4]));
+    expect(told[2]).toEqual({ zh: 'C', en: 'c' });
+    expect([0, 3, 4].map((i) => partAt(told, i))).toEqual([1, 2, 3]);
+    expect(told.filter((l) => l.id !== undefined)).toHaveLength(3);
+  });
+  it('shows that line before the next card, and ends the story after the last', () => {
+    const told = tellable(lines, new Set([1, 2, 3]));
+    expect(linesBefore(told, 3).map((l) => l.zh)).toEqual(['C']);
+    expect(linesAfter(told, 3).map((l) => l.zh)).toEqual(['E']);
   });
 });

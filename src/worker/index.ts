@@ -5,7 +5,7 @@ import { settingsRoutes } from './settings';
 import { chatRoutes } from './chat';
 import { topicRoutes } from './topics';
 import { lessonRoutes } from './lessons';
-import { prepareStory, reviewRoutes } from './review';
+import { prepareSet, reviewRoutes } from './review';
 import { sessionRoutes } from './session';
 import { pushRoutes } from './push';
 import { lookupRoutes } from './lookup';
@@ -13,13 +13,14 @@ import { assessmentRoutes, topUpStarterPool } from './assessment';
 import { textRoutes } from './texts';
 import { courseRoutes } from './course';
 import { listeningRoutes } from './listening';
+import { themeRoutes } from './themes';
 import { pageQueryRoutes } from './page-query';
 import { updateRoutes } from './updates';
 import { runReminders } from './notify';
 import { tagWordLevels } from './word-levels';
 import { listLanguages, validateLanguageConfig } from '../core/languages';
 import { MODELS } from '../core/models';
-import { enabledLanguages } from './day';
+import { enabledLanguages, heldBack, holdBack } from './day';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -52,6 +53,7 @@ app.route('/api/assessment', assessmentRoutes);
 app.route('/api/text', textRoutes);
 app.route('/api/course', courseRoutes);
 app.route('/api/listening', listeningRoutes);
+app.route('/api/themes', themeRoutes);
 app.route('/api/query-page', pageQueryRoutes);
 app.route('/api/updates', updateRoutes);
 app.get('/api/languages', async (c) => {
@@ -70,28 +72,43 @@ export default {
   fetch: app.fetch,
   // Cron (every 15 min): reminders are decided in code (times, quiet hours, session done).
   async scheduled(event, env, ctx) {
+    /** How long a background job that failed waits before the cron tries it again. */
+    const IDLE_MS = 2 * 3600_000;
     ctx.waitUntil(
       runReminders(env, new Date(event.scheduledTime))
         .then((log) => console.log(`[cron ${event.cron}]`, log.join(' | ') || 'nothing due'))
         .catch((e) => console.error('[cron] reminders failed', e)),
     );
-    // The pool kept stocked at the learner's level, and the next review set's story written ahead
-    // so the review opens without waiting for it.
+    // The pool kept stocked at the learner's level, and the next review set written ahead (its
+    // story and the sentences it needs) so the review opens without waiting for them.
     ctx.waitUntil(
       (async () => {
         for (const lang of await enabledLanguages(env.DB)) {
           // Words at the learner's level first, so the story below can use them.
           await topUpStarterPool(env, lang).catch((e) => console.error(`[cron] ${lang} starter pool failed`, e));
-          const status = await prepareStory(env, lang).catch((e) => `failed: ${e}`);
-          if (status === 'story written' || status.startsWith('failed')) console.log(`[cron ${event.cron}] ${lang} review story: ${status}`);
+          // A story that could not be written waits IDLE_MS before the cron tries again
+          // (each try is a big call); the review screen still asks for one when it needs it.
+          const idleKey = `${lang}.review_story_idle`;
+          if (await heldBack(env.DB, idleKey, IDLE_MS)) continue;
+          const { story, sentences } = await prepareSet(env, lang).catch((e) => ({ story: `failed: ${e}`, sentences: 0 }));
+          await holdBack(env.DB, idleKey, story.startsWith('failed') || story.startsWith('no story'));
+          if (story === 'story written' || story.startsWith('failed') || story.startsWith('no story') || sentences)
+            console.log(`[cron ${event.cron}] ${lang} review set: ${story}${sentences ? `; sentences for ${sentences} words` : ''}`);
         }
       })(),
     );
     // Housekeeping: band unbanded words, a batch at a time.
+    // A failed batch (it would be the same words again) waits like a failed story.
     ctx.waitUntil(
-      tagWordLevels(env)
-        .then((line) => line && console.log(`[cron ${event.cron}]`, line))
-        .catch((e) => console.error('[cron] word levels failed', e)),
+      (async () => {
+        if (await heldBack(env.DB, 'word_levels.idle', IDLE_MS)) return;
+        const line = await tagWordLevels(env).catch((e) => {
+          console.error('[cron] word levels failed', e);
+          return false as const;
+        });
+        await holdBack(env.DB, 'word_levels.idle', line === false);
+        if (line) console.log(`[cron ${event.cron}]`, line);
+      })(),
     );
   },
 } satisfies ExportedHandler<Env>;

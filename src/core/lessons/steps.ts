@@ -124,6 +124,28 @@ export function shuffle<T>(items: T[], seed: number): T[] {
   return a;
 }
 
+/**
+ * A multiple-choice item with its options in a new order and its answer moved with them, so a
+ * question met again is not answered by remembering where its answer was in the list.
+ */
+export function shuffleOptions<T extends LessonChoice>(c: T, seed: number): T {
+  const order = shuffle(
+    c.options.map((_, i) => i),
+    seed,
+  );
+  return { ...c, options: order.map((i) => c.options[i]!), answer: order.indexOf(c.answer) };
+}
+
+/** shuffleOptions for each multiple-choice item in a list; other items are left as they are. */
+export function shuffleChoices<T extends LessonChoice | LessonCheckItem>(items: T[], seed: number): T[] {
+  return items.map((it, k) => ('options' in it ? (shuffleOptions(it, seed + k * 7919) as T) : it));
+}
+
+/** A fresh seed, for an order that differs each time a set of questions is shown. */
+export function randomSeed(): number {
+  return Math.floor(Math.random() * 2 ** 31) + 1;
+}
+
 /** Exact match after normalising (punctuation, spacing, full-width forms). */
 export function sameZh(a: string, b: string): boolean {
   return normaliseZh(a) !== '' && normaliseZh(a) === normaliseZh(b);
